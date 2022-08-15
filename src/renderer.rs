@@ -1,8 +1,10 @@
 use std::{fs::File, io::Read, borrow::Cow};
 
 use bytemuck_derive::{Pod, Zeroable};
-use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, util::{DeviceExt, BufferInitDescriptor}, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor};
+use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, util::{DeviceExt, BufferInitDescriptor}, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor};
 use winit::{window::Window, dpi::PhysicalSize};
+
+use crate::world::{terrain::WorldVertex, World};
 
 pub struct Renderer {
   surface: Surface,
@@ -10,10 +12,13 @@ pub struct Renderer {
   device: Device,
   queue: Queue,
   vertex_buffer: Buffer,
+  vertex_buffer_items: u64,
+  vertex_buffer_limit: u64,
   pipeline: RenderPipeline,
   size: PhysicalSize<u32>
 }
 
+const VERTEX_BUFFER_SPARE: u64 = 10000;
 
 impl Renderer {
   pub async fn new(window: &Window) -> Result<Self, RendererCreateError> {
@@ -42,11 +47,15 @@ impl Renderer {
       ..Default::default() //TODO fix.
     }, None).await.map_err(|_| RendererCreateError::RequestDeviceError)?;
 
-    let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
-      label: Some("very cool vertex buffer"),
-      contents: bytemuck::cast_slice(&VERTICES),
+    let vertex_buffer = device.create_buffer(&BufferDescriptor {
+      label: Some("Very cool vertex buffer."),
+      mapped_at_creation: true,
+      size: VERTEX_BUFFER_SPARE * std::mem::size_of::<WorldVertex>() as u64,
       usage: BufferUsages::VERTEX
     });
+
+    let vertex_buffer_items: u64 = 0;
+    let vertex_buffer_limit: u64 = VERTEX_BUFFER_SPARE;
 
     let mut shader_file = File::open("./shaders/shader.wgsl").map_err(|_| RendererCreateError::ShaderLoadError)?;
     let mut shader: String = String::new();
@@ -104,6 +113,8 @@ impl Renderer {
       device,
       queue,
       vertex_buffer,
+      vertex_buffer_items,
+      vertex_buffer_limit,
       pipeline,
       size
     })
@@ -118,6 +129,10 @@ impl Renderer {
     }
   }
 
+  pub fn update_world_vertices(&mut self, verts: Vec<WorldVertex>) {
+    todo!();
+  }
+
   pub fn render(&self) -> Result<(), RenderError> {
     let out = self.surface.get_current_texture().map_err(|_| RenderError::SurfaceError)?;
     let view = out.texture.create_view(&Default::default());
@@ -126,7 +141,7 @@ impl Renderer {
       label: Some("very cool command encoder")
     });
 
-    {
+    if self.vertex_buffer_items > 0 {
       let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
         color_attachments: &[Some(RenderPassColorAttachment {
           ops: Operations {
@@ -145,9 +160,9 @@ impl Renderer {
         depth_stencil_attachment: None //No depth stencil for now.
       });
 
-      render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+      render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..self.vertex_buffer_items));
       render_pass.set_pipeline(&self.pipeline);
-      render_pass.draw(0..VERTICES.len() as u32, 0..1);
+      render_pass.draw(0..self.vertex_buffer_items as u32, 0..1);
     }
 
     let command_buffers = std::iter::once(encoder.finish());
@@ -159,39 +174,52 @@ impl Renderer {
   }
 }
 
+trait Descriptable {
+  fn desc<'a>() -> VertexBufferLayout<'a>;
+}
+
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 pub struct Vertex {
   position: [f32; 2] //2D for now.
 }
 
-impl Vertex {
+impl Descriptable for Vertex {
   fn desc<'a>() -> VertexBufferLayout<'a> {
     const POSITION_ATTRIBUTE: VertexAttribute = VertexAttribute {
-      format: wgpu::VertexFormat::Float32x2, //TODO change this when I do 3D.
+      format: VertexFormat::Float32x2, //TODO change this when I do 3D.
       offset: 0,
       shader_location: 0
     };
 
     VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex>() as u64,
-        step_mode: wgpu::VertexStepMode::Vertex,
+        step_mode: VertexStepMode::Vertex,
         attributes: &[POSITION_ATTRIBUTE],
     }
   }
 }
 
-const VERTICES: [Vertex; 3] = [
-  Vertex {
-    position: [0.0, 0.5],
-  },
-  Vertex {
-    position: [-0.5, -0.5]
-  },
-  Vertex {
-    position: [0.5, -0.5]
+impl Descriptable for WorldVertex {
+  fn desc<'a>() -> VertexBufferLayout<'a> {
+    VertexBufferLayout {
+      array_stride: std::mem::size_of::<WorldVertex>() as u64,
+      step_mode: VertexStepMode::Vertex,
+      attributes: &[
+        VertexAttribute { //Position
+          format: VertexFormat::Float32x3,
+          offset: 0,
+          shader_location: 0
+        },
+        VertexAttribute { //UV Mapping (Future)
+          format: VertexFormat::Float32x2,
+          offset: std::mem::size_of::<[f32; 3]>() as u64,
+          shader_location: 1
+        }
+      ],
+    }
   }
-];
+}
 
 #[derive(Debug)]
 pub enum RendererCreateError {

@@ -8,7 +8,7 @@ pub enum Block {
 }
 
 impl Block {
-  fn is_transparent(&self) -> bool {
+  pub fn is_translucent(&self) -> bool {
     match self {
       Air => true,
       _ => false
@@ -17,13 +17,43 @@ impl Block {
 }
 
 #[repr(u8)]
+#[derive(Clone, Copy)]
 pub enum BlockSide {
-  Front = 0,
-  Back = 1,
-  Left = 2,
-  Right = 3,
-  Bottom = 4,
-  Top = 5
+  Left = 0,
+  Right = 1,
+  Above = 2,
+  Below = 3,
+  Front = 4,
+  Back = 5,
+}
+
+impl BlockSide {
+  pub fn get_face_offset_vectors(&self) -> [[f32; 3]; 4] { //Verts are wound counter-clockwise
+    match self { //See cubedirections.png
+        BlockSide::Left => [0, 2, 3, 1],
+        BlockSide::Right => [4, 5, 7, 6],
+        BlockSide::Above => [3, 2, 7, 6],
+        BlockSide::Below => [0, 1, 5, 4],
+        BlockSide::Front => [0, 4, 6, 2],
+        BlockSide::Back => [1, 3, 7, 5],
+    }.map(number_to_offset_vector)
+  }
+}
+
+impl TryFrom<u8> for BlockSide {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+          0 => Ok(BlockSide::Left),
+          1 => Ok(BlockSide::Right),
+          2 => Ok(BlockSide::Above),
+          3 => Ok(BlockSide::Below),
+          4 => Ok(BlockSide::Front),
+          5 => Ok(BlockSide::Back),
+          _ => Err(())
+        }
+    }
 }
 
 /// This is so we can cull faces that we can't see.
@@ -32,8 +62,8 @@ pub struct BlockSideVisibility {
 }
 
 impl BlockSideVisibility {
-  pub fn new(default_transparent: bool) -> Self {
-    let flags = if default_transparent {0x3Fu8} else {0x00u8};
+  pub fn new(default_visibility: bool) -> Self {
+    let flags = if default_visibility {0x3Fu8} else {0x00u8};
     Self {
       flags
     }
@@ -53,9 +83,19 @@ impl BlockSideVisibility {
   }
 }
 
+fn number_to_offset_vector(num: usize) -> [f32; 3] { //see cube directions.png
+  [
+    num&0b100 > 0,
+    num&0b10 > 0,
+    num&0b1 > 0,
+  ].map(|val| if val {1.0} else {0.0})
+}
+
 #[cfg(test)]
 mod tests {
-  use super::{BlockSideVisibility, BlockSide};
+  use crate::world::block::number_to_offset_vector;
+
+use super::{BlockSideVisibility, BlockSide};
 
   #[test]
   fn test_block_side() {
@@ -72,5 +112,13 @@ mod tests {
     assert!(vis.get_visible(BlockSide::Right));
 
 
+  }
+
+  #[test]
+  fn test_offset_vector() {
+    assert_eq!(number_to_offset_vector(1), [0.0, 0.0, 1.0]);
+    assert_eq!(number_to_offset_vector(0), [0.0, 0.0, 0.0]);
+    assert_eq!(number_to_offset_vector(4), [1.0, 0.0, 0.0]);
+    assert_eq!(number_to_offset_vector(7), [1.0, 1.0, 1.0]);
   }
 }
