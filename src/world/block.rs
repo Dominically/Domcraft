@@ -10,7 +10,7 @@ pub enum Block {
 impl Block {
   pub fn is_translucent(&self) -> bool {
     match self {
-      Air => true,
+      Block::Air => true,
       _ => false
     }
   }
@@ -19,23 +19,23 @@ impl Block {
 #[repr(u8)]
 #[derive(Clone, Copy)]
 pub enum BlockSide {
-  Left = 0,
-  Right = 1,
+  Right = 0,
+  Left = 1,
   Above = 2,
   Below = 3,
-  Front = 4,
-  Back = 5,
+  Back = 4,
+  Front = 5,
 }
 
 impl BlockSide {
   pub fn get_face_offset_vectors(&self) -> [[f32; 3]; 4] { //Verts are wound counter-clockwise
     match self { //See cubedirections.png
-        BlockSide::Left => [0, 2, 3, 1],
         BlockSide::Right => [4, 5, 7, 6],
-        BlockSide::Above => [3, 2, 7, 6],
+        BlockSide::Left => [0, 2, 3, 1],
+        BlockSide::Above => [3, 2, 6, 7],
         BlockSide::Below => [0, 1, 5, 4],
-        BlockSide::Front => [0, 4, 6, 2],
         BlockSide::Back => [1, 3, 7, 5],
+        BlockSide::Front => [0, 4, 6, 2],
     }.map(number_to_offset_vector)
   }
 }
@@ -45,18 +45,19 @@ impl TryFrom<u8> for BlockSide {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-          0 => Ok(BlockSide::Left),
-          1 => Ok(BlockSide::Right),
+          0 => Ok(BlockSide::Right),
+          1 => Ok(BlockSide::Left),
           2 => Ok(BlockSide::Above),
           3 => Ok(BlockSide::Below),
-          4 => Ok(BlockSide::Front),
-          5 => Ok(BlockSide::Back),
+          4 => Ok(BlockSide::Back),
+          5 => Ok(BlockSide::Front),
           _ => Err(())
         }
     }
 }
 
-/// This is so we can cull faces that we can't see.
+/// This is so I can cull faces that can't be seen.
+#[derive(Debug)]
 pub struct BlockSideVisibility {
   flags: u8 //Uses bit setting because i dont want to run out of ram again.
 }

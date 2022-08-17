@@ -1,9 +1,14 @@
-use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent}};
+use std::sync::{Mutex, Arc};
 
-use crate::renderer::Renderer;
+use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState}};
+
+use crate::{renderer::Renderer, world::World};
 
 mod renderer;
 mod world;
+mod stolen;
+
+pub type ArcWorld = Arc<Mutex<World>>;
 
 fn main() {
   println!("Hello, world!");
@@ -11,15 +16,17 @@ fn main() {
 }
 
 async fn run() {
-
+  let world = Arc::new(Mutex::new(World::new()));
   let event_loop = EventLoop::new();
   let window = WindowBuilder::new()
     .with_title("DomCraft [INDEV]").build(&event_loop).expect("Failed to create window!");
+  let mut renderer = Renderer::new(&window, world.clone()).await.unwrap();
   
-  let mut renderer = Renderer::new(&window).await.unwrap();
 
   event_loop.run(move |evt, _, ctrl| {
-    *ctrl = ControlFlow::Wait;
+    let mut wrld = world.lock().unwrap();
+    wrld.tick();
+    drop(wrld);
 
     match evt {
       Event::WindowEvent { window_id, event } if window.id() == window_id => {
@@ -29,10 +36,37 @@ async fn run() {
           },
           WindowEvent::Resized(new_size) => {
             renderer.resize(new_size);
-            renderer.render().unwrap();
+          },
+          WindowEvent::KeyboardInput { device_id: _, input, is_synthetic: _ } => {
+            match input.virtual_keycode {
+              Some(key) => {
+                let mut world = world.lock().unwrap();
+                match input.state {
+                  ElementState::Pressed => world.key_update(key, true),
+                  ElementState::Released => world.key_update(key, false),
+                  
+                }
+              }
+              _ => ()
+            }
           }
           _ => ()
         }
+      }
+      Event::RedrawRequested( window_id ) if window.id() == window_id => {
+        renderer.render().unwrap();
+      },
+      Event::DeviceEvent { device_id, event } => { //Raw input from val?
+        match event {
+          winit::event::DeviceEvent::MouseMotion { delta } => {
+            let mut world = world.lock().unwrap();
+            world.mouse_move(delta);
+          },
+          _ => ()
+        }
+      },
+      Event::MainEventsCleared => {
+        window.request_redraw()
       }
       _ => (),
     }
