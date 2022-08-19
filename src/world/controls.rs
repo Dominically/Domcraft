@@ -1,5 +1,4 @@
 use std::{collections::HashMap};
-use cgmath::Vector3;
 use winit::event::VirtualKeyCode;
 
 //TODO swap hashmaps with EnumMap(s).
@@ -18,19 +17,6 @@ pub enum Control {
   Up,
   Down
 }
-
-// impl Control {
-//   fn to_direction_vector(&self) -> Vector3<f32> {
-//     match self {
-//         Control::Forward => [0.0, 0.0, 1.0],
-//         Control::Backward => [0.0, 0.0, -1.0],
-//         Control::Left => [-1.0, 0.0, 0.0],
-//         Control::Right => [1.0, 0.0, 0.0],
-//         Control::Up => [0.0, 1.0, 0.0],
-//         Control::Down => [0.0, -1.0, 0.0],
-//     }.into()
-//   }
-// }
 
 impl Controller {
   pub fn new() -> Self {

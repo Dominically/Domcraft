@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use cgmath::{Vector3, Matrix4, Rad, Deg, Matrix3, SquareMatrix, Point3, num_traits::clamp};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp};
 
 use crate::stolen::projection;
 
@@ -26,7 +26,7 @@ impl Player {
   pub fn get_view_matrix(&self, aspect_ratio: f32) -> Matrix4<f32> {
     let rotation = self.get_rotation_matrix();
     let view = Matrix4::look_to_lh(self.position, rotation.z, rotation.y);
-    let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 100.0);
+    let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 400.0);
 
     projection * view
   }

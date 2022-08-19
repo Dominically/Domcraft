@@ -38,6 +38,17 @@ impl BlockSide {
         BlockSide::Front => [0, 4, 6, 2],
     }.map(number_to_offset_vector)
   }
+
+  pub fn get_face_normal(&self) -> [f32; 3] {
+    match self {
+        BlockSide::Right => [1.0, 0.0, 0.0],
+        BlockSide::Left => [-1.0, 0.0, 0.0],
+        BlockSide::Above => [0.0, 1.0, 0.0],
+        BlockSide::Below => [0.0, -1.0, 0.0],
+        BlockSide::Back => [0.0, 0.0, 1.0],
+        BlockSide::Front => [0.0, 0.0, -1.0],
+    }
+  }
 }
 
 impl TryFrom<u8> for BlockSide {
@@ -81,6 +92,10 @@ impl BlockSideVisibility {
 
   pub fn get_visible(&self, side: BlockSide) -> bool { //more magic
     (self.flags & 1u8 << side as u8) > 0
+  }
+
+  pub fn is_invisible(&self) -> bool {
+    self.flags == 0
   }
 }
 

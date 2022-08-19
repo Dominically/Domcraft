@@ -3,8 +3,8 @@ mod texture;
 use std::{fs::File, io::Read, borrow::Cow};
 
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::Matrix4;
-use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindGroup, DepthStencilState, CompareFunction, StencilState, DepthBiasState, RenderPassDepthStencilAttachment, LoadOp, TextureSampleType, TextureDimension, SamplerBindingType, TextureViewDimension, BindingResource};
+use cgmath::{Matrix4, Vector3};
+use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindGroup, DepthStencilState, CompareFunction, StencilState, DepthBiasState, RenderPassDepthStencilAttachment, LoadOp, TextureSampleType, SamplerBindingType, TextureViewDimension, BindingResource};
 use winit::{window::Window, dpi::PhysicalSize};
 
 use crate::{world::{terrain::WorldVertex}, ArcWorld, renderer::texture::Texture};
@@ -17,7 +17,6 @@ pub struct Renderer {
   vertex_buffer: Buffer,
   vertex_buffer_items: u64, //Length in items (not bytes)
   vertex_buffer_limit: u64, //Also in items
-  main_tex_bind_group: BindGroup,
   camera_buffer: Buffer,
   camera_bind_group: BindGroup,
   depth_texture: Texture,
@@ -27,6 +26,7 @@ pub struct Renderer {
 }
 
 const VERTEX_BUFFER_SPARE: u64 = 10000; //This is items, not bytes.
+
 
 impl Renderer {
   pub async fn new(window: &Window, world: ArcWorld) -> Result<Self, RendererCreateError> {
@@ -104,53 +104,10 @@ impl Renderer {
         }],
     });
 
-    let mut image_bytes = Vec::new();
-    File::open("./texture.png").expect("Failed to open main texture!").read_to_end(&mut image_bytes).expect("Image file had a read error.");
-    let img = image::load_from_memory(&image_bytes).expect("Main texture is corrupt.");
-    
-    let main_texture = Texture::from_image(&device, &queue, &img, Some("VERY COOL IMAGE")).unwrap();
-
-    let main_tex_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-          BindGroupLayoutEntry {
-            binding: 0,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Texture {
-                sample_type: TextureSampleType::Float { filterable: true },
-                view_dimension: TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-          },
-          BindGroupLayoutEntry {
-            binding: 1,
-            visibility: ShaderStages::FRAGMENT,
-            ty: BindingType::Sampler(SamplerBindingType::Filtering),
-            count: None
-          }
-        ],
-    });
-
-    let main_tex_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: None,
-        layout: &main_tex_layout,
-        entries: &[
-          BindGroupEntry {
-            binding: 0,
-            resource: BindingResource::TextureView(&main_texture.view),
-          },
-          BindGroupEntry {
-            binding: 1,
-            resource: BindingResource::Sampler(&main_texture.sampler)
-          }
-        ],
-    });
-
     let depth_texture = Texture::create_depth_texture(&device, &surface_cfg, "Depth texture and stuff");
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-      bind_group_layouts: &[&camera_bind_group_layout, &main_tex_layout],
+      bind_group_layouts: &[&camera_bind_group_layout],
       label: Some("stinky pipeline layout"),
       push_constant_ranges: &[]
     }); //Not really necessary right now.
@@ -204,7 +161,6 @@ impl Renderer {
       vertex_buffer,
       vertex_buffer_items,
       vertex_buffer_limit,
-      main_tex_bind_group,
       depth_texture,
       camera_bind_group,
       camera_buffer,
@@ -295,7 +251,6 @@ impl Renderer {
 
       render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..self.vertex_buffer_items * std::mem::size_of::<WorldVertex>() as u64));
       render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-      render_pass.set_bind_group(1, &self.main_tex_bind_group, &[]);
       render_pass.set_pipeline(&self.pipeline);
       render_pass.draw(0..self.vertex_buffer_items as u32, 0..1);
     }
@@ -345,7 +300,7 @@ impl Descriptable for WorldVertex {
           shader_location: 0
         },
         VertexAttribute { //UV Mapping (Future)
-          format: VertexFormat::Float32x2,
+          format: VertexFormat::Float32x3,
           offset: std::mem::size_of::<[f32; 3]>() as u64,
           shader_location: 1
         }

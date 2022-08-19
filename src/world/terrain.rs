@@ -1,5 +1,7 @@
 use bytemuck_derive::{Pod, Zeroable};
+use cgmath::{Vector3, InnerSpace, num_traits::clamp};
 use itertools::iproduct;
+use noise::{Perlin, NoiseFn};
 
 use super::block::{Block, BlockSideVisibility, BlockSide};
 
@@ -13,39 +15,24 @@ pub struct Terrain {
   pending_vertex_update: bool
 }
 
+pub enum TerrainType {
+  Regular,
+  Superflat
+}
+
+const SUN_VECTOR:Vector3<f32> = Vector3 { x: 0.0, y: 1.0, z: 0.0 };
+
 impl Terrain {
   /// Generate a superflat world.
-  pub fn gen_superflat(length: usize, height: usize, width: usize) -> Self {
+  pub fn gen(typ: TerrainType, length: usize, height: usize, width: usize) -> Self {
     let mut blocks = Vec::with_capacity(length * width * height);
-    for x in 0..length {
-      for y in 0..height {
-        let block = match y {
-          0 => { //Ground = bedrock
-            Block::Bedrock
-          },
-          1..=5 => { //Some stone
-            Block::Stone
-          },
-          6 => { //Grass to top it off.
-            Block::Grass
-          },
-          _ => { //Air for the rest
-            Block::Air
-          }
-        };
-
-        for z in 0..width {
-          //TESTING ONLY
-          if x == 128 && y == 6 && z == 128 {
-            blocks.push(Block::Air);
-          } else {
-            blocks.push(block);
-          }
-        }
-      }
+    match typ {
+        TerrainType::Regular => perlin_heightmap_blocks(&mut blocks, length, height, width),
+        TerrainType::Superflat => superflat_blocks(&mut blocks, length, height, width),
     }
 
-    let mut surface_visibility = Vec::with_capacity(0);
+    let surface_visibility = Vec::with_capacity(0);
+
     let mut this = Self {
       blocks,
       length,
@@ -62,14 +49,12 @@ impl Terrain {
     this
   }
 
+  
+
   /// Gets a block at a certain location. Returns None if the block is out of range. WIll panic if something weird happens (this should not be possible).
   fn get_block_at(&self, x: usize, y: usize, z: usize) -> Option<Block> {
     let index = pos_to_index(x, y, z, self.length, self.height, self.width)?;
     Some(*self.blocks.get(index).expect("Index out of bounds when retrieving block."))
-  }
-
-  pub fn get_size(&self) -> (usize, usize, usize) {
-    (self.length, self.height, self.width)
   }
 
   fn update_surface_visibility(&mut self) {
@@ -127,12 +112,15 @@ impl Terrain {
 
     let mut vertices = Vec::<WorldVertex>::with_capacity(1000000); //big vec.
     for ((x, y, z), (vis, block)) in self.block_iter().zip(self.surface_visibility.iter().zip(self.blocks.iter())) {
-      let uv_initial = match block {
-        Block::Stone => [0.25, 0.0],
-        Block::Grass => [0.0, 0.0],
-        Block::Bedrock => [0.5, 0.0],
-        _ => [0.75, 0.0], //Missing texture
+      if vis.is_invisible() {continue}; //Don't waste time on invisible blocks.
+      let colour = match block {
+        Block::Stone => [0.5, 0.5, 0.5],
+        Block::Grass => [0.3, 0.7, 0.3],
+        Block::Bedrock => [0.1, 0.1, 0.1],
+        _ => [1.0, 0.0, 1.0], //MISSING COLOUR
       };
+
+      
       
       for side_i in 0..6 {
         let side = BlockSide::try_from(side_i).unwrap();
@@ -143,19 +131,19 @@ impl Terrain {
           // println!("XYZ {}, {}, {}", x, y, z);
           // println!("Vecs: {:?}", vecs);
           // panic!();
+
+          let normal: Vector3<f32> = BlockSide::get_face_normal(&side).into();
+
+          let dot_prod = normal.dot(SUN_VECTOR);
+          let light_level = clamp((dot_prod+1.0)/2.0, 0.1, 1.0); //Normalise dot product in range 0..1
+          let adjusted_colour = colour.map(|c| c*light_level);
           
           for vertex_index in WINDING_ORDER {
-            let uv_offset = match vertex_index {
-              1 => [0.25, 0.0],
-              2 => [0.25, 0.25],
-              3 => [0.0, 0.25],
-              _ => [0.0, 0.0],
-            };
 
             vertices.push(
               WorldVertex {
                 position: vecs[vertex_index],
-                uv: [uv_initial[0] + uv_offset[0], uv_initial[1] + uv_offset[1]]
+                colour: adjusted_colour
               }
             );
           }
@@ -183,6 +171,65 @@ impl Terrain {
   }
 }
 
+fn superflat_blocks(blocks: &mut Vec<Block>, length: usize, height: usize, width: usize) {
+  for x in 0..length {
+    for y in 0..height {
+      let block = match y {
+        0 => { //Ground = bedrock
+          Block::Bedrock
+        },
+        1..=5 => { //Some stone
+          Block::Stone
+        },
+        6 => { //Grass to top it off.
+          Block::Grass
+        },
+        _ => { //Air for the rest
+          Block::Air
+        }
+      };
+
+      for z in 0..width {
+        //TESTING ONLY
+        if x == 128 && z == 128 {
+          blocks.push(Block::Air);
+        } else {
+          blocks.push(block);
+        }
+      }
+    }
+  }
+}
+
+fn perlin_heightmap_blocks(blocks: &mut Vec<Block>, length: usize, height: usize, width: usize) {
+  let noise = Perlin::new();
+  let mut heightmap = Vec::<usize>::with_capacity(length * width);
+  for x in 0..length {
+    for z in 0..width {
+      let value:f64 = noise.get([x as f64 * 10.0/length as f64, z as f64 * 10.0/width as f64]);
+      heightmap.push(1 + ((value + 1.0) * 5.0) as usize);
+    }
+  }
+
+  for x in 0..length {
+    for y in 0..height {
+      for z in 0..width {
+        let h = *heightmap.get(x*width + z).expect("Error reading from heightmap.");
+        let block: Block;
+        if y == 0 {
+          block = Block::Bedrock
+        } else if y < h {
+          block = Block::Stone
+        } else if y == h {
+          block = Block::Grass
+        } else {
+          block = Block::Air
+        }
+        blocks.push(block);
+      }
+    }
+  }
+}
 
 fn pos_to_index(x: usize, y: usize, z: usize, length: usize, height: usize, width: usize) -> Option<usize> {
   if x < length && y < height && z < width {
@@ -197,16 +244,16 @@ fn pos_to_index(x: usize, y: usize, z: usize, length: usize, height: usize, widt
 #[repr(C)]
 pub struct WorldVertex {
   pub position: [f32; 3],
-  pub uv: [f32; 2]
+  pub colour: [f32; 3]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Block, Terrain};
+    use super::{Block, Terrain, TerrainType};
 
   #[test]
   fn test_superflat() { //Test world gen.
-    let world = Terrain::gen_superflat(256, 256, 256);
+    let world = Terrain::gen(TerrainType::Superflat,256, 256, 256);
 
     assert_eq!(world.get_block_at(0, 0, 0), Some(Block::Bedrock));
     assert_eq!(world.get_block_at(45, 0, 20), Some(Block::Bedrock));

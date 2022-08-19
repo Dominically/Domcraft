@@ -3,7 +3,7 @@ use std::time::Instant;
 use cgmath::{Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
-use self::{terrain::{Terrain, WorldVertex}, player::Player, controls::{Controller, Control}};
+use self::{terrain::{Terrain, WorldVertex, TerrainType}, player::Player, controls::{Controller, Control}};
 
 pub mod terrain;
 mod block;
@@ -23,8 +23,8 @@ pub struct World {
 
 impl World {
   pub fn new() -> Self {
-    let terrain = Terrain::gen_superflat(256, 256, 256);
-    let player = Player::new([128.0, 15.0, 128.0].into());
+    let terrain = Terrain::gen(TerrainType::Regular, 256, 256, 256);
+    let player = Player::new([128.0, 40.0, 128.0].into());
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
