@@ -3,7 +3,7 @@ mod texture;
 use std::{fs::File, io::Read, borrow::Cow};
 
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::{Matrix4, Vector3};
+use cgmath::{Matrix4};
 use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindGroup, DepthStencilState, CompareFunction, StencilState, DepthBiasState, RenderPassDepthStencilAttachment, LoadOp, TextureSampleType, SamplerBindingType, TextureViewDimension, BindingResource};
 use winit::{window::Window, dpi::PhysicalSize};
 
@@ -213,7 +213,11 @@ impl Renderer {
 
     let world = self.world.lock().unwrap();
     let view_mat = world.get_player_view(self.size.width as f32/self.size.height as f32);
-    let camera_view = CameraUniform::from(view_mat);
+    let camera_view = CameraUniform {
+      view: view_mat.into(),
+      sun_intensity: 1.0,
+      sun_normal: [-0.20265, 0.97566, 0.08378]
+    };
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
 
     let out = self.surface.get_current_texture().map_err(|_| RenderError::SurfaceError)?;
@@ -228,9 +232,9 @@ impl Renderer {
         color_attachments: &[Some(RenderPassColorAttachment {
           ops: Operations {
             load: LoadOp::Clear(Color {
-              r: 0.0,
+              r: 0.5,
               g: 0.0,
-              b: 0.5,
+              b: 0.0,
               a: 0.0
             }),
             store: true
@@ -277,15 +281,9 @@ trait Descriptable {
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 pub struct CameraUniform {
-  view: [[f32; 4]; 4]
-}
-
-impl From<Matrix4<f32>> for CameraUniform {
-  fn from(m: Matrix4<f32>) -> Self {
-      Self {
-        view: m.into()
-      }
-  }
+  pub view: [[f32; 4]; 4],
+  pub sun_normal: [f32; 3],
+  pub sun_intensity: f32
 }
 
 impl Descriptable for WorldVertex {
@@ -303,6 +301,11 @@ impl Descriptable for WorldVertex {
           format: VertexFormat::Float32x3,
           offset: std::mem::size_of::<[f32; 3]>() as u64,
           shader_location: 1
+        },
+        VertexAttribute { //Vertex normal
+          format: VertexFormat::Float32x3,
+          offset: std::mem::size_of::<[f32; 3]>() as u64 * 2,
+          shader_location: 2
         }
       ],
     }

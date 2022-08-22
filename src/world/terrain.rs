@@ -20,7 +20,7 @@ pub enum TerrainType {
   Superflat
 }
 
-const SUN_VECTOR:Vector3<f32> = Vector3 { x: 0.0, y: 1.0, z: 0.0 };
+const SUN_VECTOR:Vector3<f32> = Vector3 { x: -0.20265, y: 0.97566, z: 0.08378 };
 
 impl Terrain {
   /// Generate a superflat world.
@@ -132,18 +132,16 @@ impl Terrain {
           // println!("Vecs: {:?}", vecs);
           // panic!();
 
-          let normal: Vector3<f32> = BlockSide::get_face_normal(&side).into();
+          let normal: [f32; 3] = BlockSide::get_face_normal(&side).into();
 
-          let dot_prod = normal.dot(SUN_VECTOR);
-          let light_level = clamp((dot_prod+1.0)/2.0, 0.1, 1.0); //Normalise dot product in range 0..1
-          let adjusted_colour = colour.map(|c| c*light_level);
           
           for vertex_index in WINDING_ORDER {
 
             vertices.push(
               WorldVertex {
                 position: vecs[vertex_index],
-                colour: adjusted_colour
+                colour,
+                normal
               }
             );
           }
@@ -207,7 +205,7 @@ fn perlin_heightmap_blocks(blocks: &mut Vec<Block>, length: usize, height: usize
   for x in 0..length {
     for z in 0..width {
       let value:f64 = noise.get([x as f64 * 10.0/length as f64, z as f64 * 10.0/width as f64]);
-      heightmap.push(1 + ((value + 1.0) * 5.0) as usize);
+      heightmap.push(1 + ((value + 1.0) * 10.0) as usize);
     }
   }
 
@@ -244,7 +242,8 @@ fn pos_to_index(x: usize, y: usize, z: usize, length: usize, height: usize, widt
 #[repr(C)]
 pub struct WorldVertex {
   pub position: [f32; 3],
-  pub colour: [f32; 3]
+  pub colour: [f32; 3],
+  pub normal: [f32; 3]
 }
 
 #[cfg(test)]

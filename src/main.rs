@@ -66,7 +66,7 @@ async fn run() {
           winit::event::DeviceEvent::MouseMotion { delta } => {
             let mut world = world.lock().unwrap();
             world.mouse_move(delta);
-            let _ = window.set_cursor_position(LogicalPosition::new(0.5, 0.5));
+            //let _ = window.set_cursor_position(LogicalPosition::new(0.5, 0.5));
           },
           _ => ()
         }

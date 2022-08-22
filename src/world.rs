@@ -9,6 +9,8 @@ pub mod terrain;
 mod block;
 mod player;
 mod controls;
+mod chunkedterrain;
+mod chunk;
 
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.

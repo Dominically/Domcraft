@@ -2,6 +2,7 @@
 struct VertexInput {
   @location(0) position: vec3<f32>,
   @location(1) colour: vec3<f32>,
+  @location(2) normal: vec3<f32>
 };
 
 
@@ -10,8 +11,11 @@ struct VertexOutput {
     @location(0) colour: vec3<f32>,
 };
 
+
 struct CameraUniform {
-    view_proj: mat4x4<f32>
+    view_proj: mat4x4<f32>,
+    sun_normal: vec3<f32>,
+    sun_intensity: f32
 }
 
 @group(0) @binding(0) // 1.
@@ -21,7 +25,10 @@ var<uniform> camera: CameraUniform;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4(in.position, 1.0);
-    out.colour = pow(in.colour, vec3<f32>(2.2, 2.2, 2.2));
+    let dot_product = dot(in.normal, camera.sun_normal);
+    let light_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0);
+
+    out.colour = pow(in.colour, vec3<f32>(2.2, 2.2, 2.2)) * light_level;
     return out;
 }
 
