@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 
@@ -6,6 +8,7 @@ use super::chunk::Chunk;
 pub const CHUNK_SIZE: usize = 16;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
 pub const CHUNK_LENGTH: usize = HEIGHTMAP_SIZE*CHUNK_SIZE;
+pub const CHUNK_RANGE: Range<usize> = 0..CHUNK_SIZE;
 
 pub type SurfaceHeightmap = [i32; HEIGHTMAP_SIZE];
 
@@ -15,12 +18,38 @@ pub struct ChunkedTerrain {
 }
 
 impl ChunkedTerrain {
-  fn new(player_position: [f64; 3]/*Change player position to fixed precision */, render_distance: u32) -> Self {
+  pub fn new(player_position: [f64; 3]/*Change player position to fixed precision */, render_distance: u32) -> Self {
     let chunk_list = generate_chunk_list(player_position, render_distance);
-
-    let columns: Vec<ChunkColumn> = Vec::new();
+    let generator = Perlin::new();
+    let mut columns: Vec<ChunkColumn> = Vec::new();
     
-    todo!()
+    for chunk_id in chunk_list {
+      let mut column: Option<&mut ChunkColumn> = None;
+      for col in columns.iter_mut() {
+        if col.chunk_id_xz == [chunk_id[0], chunk_id[2]] {
+          column = Some(col);
+          break;
+        }
+      }
+
+      let column = if let Some(c) = column {
+        c
+      } else {
+        let new_col = ChunkColumn::new(&generator, [chunk_id[0], chunk_id[2]]);
+        let index = columns.len();
+        columns.push(new_col);
+        columns.get_mut(index).unwrap()
+      };
+
+      let chunk = Chunk::new(&generator, chunk_id, column.height_map);
+
+      column.chunks.push(chunk);
+    }
+    
+    Self {
+      columns,
+      render_distance
+    }
   }
 }
 
@@ -32,10 +61,10 @@ struct ChunkColumn {
 }
 
 impl ChunkColumn {
-  fn new(gen: Perlin, chunk_xz: [i32; 2]) -> Self {
+  fn new(gen: &Perlin, chunk_xz: [i32; 2]) -> Self {
     let noise_coords = chunk_xz.map(|val| (val*CHUNK_SIZE as i32) as f64 / 10.0);
     let mut height_map: SurfaceHeightmap = [0i32; HEIGHTMAP_SIZE];
-    for ((x,z), hm) in iproduct!(0..CHUNK_SIZE, 0..CHUNK_SIZE).zip(height_map.iter_mut()) {
+    for ((x,z), hm) in iproduct!(CHUNK_RANGE, CHUNK_RANGE).zip(height_map.iter_mut()) {
       *hm = (gen.get([
         noise_coords[0] + x as f64,
         noise_coords[1] + z as f64
@@ -62,3 +91,5 @@ fn generate_chunk_list(position: [f64; 3], render_distance: u32) -> Vec<[i32; 3]
 
   chunks
 }
+
+ 
