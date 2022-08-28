@@ -1,7 +1,8 @@
+use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
 use noise::Perlin;
 
-use super::{block::{Block, BlockSideVisibility, BlockSide, self}, terrain::WorldVertex, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
+use super::{block::{Block, BlockSideVisibility, BlockSide, self}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
 pub struct Chunk {
   chunk_id: [i32; 3],
@@ -109,11 +110,41 @@ impl Chunk {
   }
 
   /// Gets the vertices of the chunk. gen_block_vis must be called at least once before this is called.
-  pub fn get_vertices(&self) -> Vec<WorldVertex> { //Generate a vertex buffer for the chunk.
+  pub fn get_vertices(&self) -> Vec<ChunkVertex> { //Generate a vertex buffer for the chunk.
     let block_vis = self.block_vis.as_ref().expect("Please call gen_block_vis before generating vertices.");
-    let vertices = Vec::new();
+    let mut vertices = Vec::new();
+    
+    const WINDING_ORDER: [usize; 6] = [0, 1, 2, 2, 3, 0];
+
     for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.iter().zip(block_vis)) {
-      todo!();
+      if block_visibility.is_invisible() {continue}; //Skip invisible blocks.
+  
+      let colour = match block {
+        Block::Stone => [0.5, 0.5, 0.5],
+        Block::Grass => [0.3, 0.7, 0.3],
+        Block::Bedrock => [0.1, 0.1, 0.1],
+        _ => [1.0, 0.0, 1.0], //MISSING COLOUR
+      };
+
+      for side_i in 0..6 { //Corresponds to BlockSide values.
+        let side = BlockSide::try_from(side_i).unwrap();
+
+        if !block_visibility.get_visible(side) {continue}; //Skip this side if it is not visible.
+
+        let vecs = side.get_face_offset_vectors().map(|vec| {
+          [vec[0] + x as f32, vec[1] + y as f32, vec[2] + z as f32]
+        });
+
+        let normal = side.get_face_normal(); //get the face normal.
+
+        for vertex in WINDING_ORDER.iter().map(|i| vecs[*i]) {
+          vertices.push(ChunkVertex {
+            relative_position: vertex,
+            colour,
+            normal
+          });
+        }
+      }
     }
     vertices
   }
@@ -121,4 +152,12 @@ impl Chunk {
 
 fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
   iproduct!(CHUNK_RANGE, CHUNK_RANGE, CHUNK_RANGE)
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct ChunkVertex {
+  relative_position: [f32; 3],
+  colour: [f32; 3],
+  normal: [f32; 3]
 }

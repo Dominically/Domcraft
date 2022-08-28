@@ -7,14 +7,14 @@ use crate::stolen::projection;
 const DEFAULT_FOV:f32 = 75.0;
 
 pub struct Player {
-  pub position: Point3<f32>,
+  pub position: Point3<f64>,
   yaw: Rad<f32>,
   pitch: Rad<f32>,
   pub fov: f32
 }
 
 impl Player {
-  pub fn new(position: Point3<f32>) -> Self {
+  pub fn new(position: Point3<f64>) -> Self {
     Self {
       position,
       yaw: Rad(0.0),

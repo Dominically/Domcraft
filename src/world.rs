@@ -3,20 +3,19 @@ use std::time::Instant;
 use cgmath::{Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
-use self::{terrain::{Terrain, WorldVertex, TerrainType}, player::Player, controls::{Controller, Control}};
+use self::{player::Player, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain};
 
-pub mod terrain;
 mod block;
 mod player;
 mod controls;
-mod chunkedterrain;
-mod chunk;
+pub mod chunkedterrain;
+pub mod chunk;
 
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.
 const NOCLIP_SPEED: f32 = 5.0; //blocks/sec
 pub struct World {
-  terrain: Terrain,
+  terrain: ChunkedTerrain,
   player: Player,
   last_tick: Instant,
   controller: Controller
@@ -25,8 +24,11 @@ pub struct World {
 
 impl World {
   pub fn new() -> Self {
-    let terrain = Terrain::gen(TerrainType::Regular, 256, 256, 256);
-    let player = Player::new([128.0, 40.0, 128.0].into());
+    let player_pos: [f32; 3] = [128.0, 40.0, 128.0];
+    
+    let player = Player::new(player_pos.into());
+    
+    let terrain = ChunkedTerrain::new(player.position.into() as [f64; 3], 64);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
@@ -51,10 +53,6 @@ impl World {
       last_tick,
       controller
     }
-  }
-
-  pub fn get_terrain_vertex_update(&mut self) -> Option<&Vec<WorldVertex>> {
-    self.terrain.get_vertex_update()
   }
 
   pub fn get_player_view(&self, aspect_ratio: f32) -> Matrix4<f32> {

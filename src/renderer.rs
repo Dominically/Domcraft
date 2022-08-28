@@ -1,28 +1,28 @@
 mod texture;
+mod vertex_buffer;
 
 use std::{fs::File, io::Read, borrow::Cow};
 
 use bytemuck_derive::{Pod, Zeroable};
-use cgmath::{Matrix4};
 use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindGroup, DepthStencilState, CompareFunction, StencilState, DepthBiasState, RenderPassDepthStencilAttachment, LoadOp, TextureSampleType, SamplerBindingType, TextureViewDimension, BindingResource};
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{world::{terrain::WorldVertex}, ArcWorld, renderer::texture::Texture};
+use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
+
+use self::vertex_buffer::VertexBuffer;
 
 pub struct Renderer {
   surface: Surface,
   surface_cfg: SurfaceConfiguration,
   device: Device,
   queue: Queue,
-  vertex_buffer: Buffer,
-  vertex_buffer_items: u64, //Length in items (not bytes)
-  vertex_buffer_limit: u64, //Also in items
   camera_buffer: Buffer,
   camera_bind_group: BindGroup,
   depth_texture: Texture,
   pipeline: RenderPipeline,
   size: PhysicalSize<u32>,
-  world: ArcWorld
+  world: ArcWorld,
+  chunk_buffers: Vec<ChunkBuffer>, //TODO optimise storage so it can be updated more quickly.
 }
 
 const VERTEX_BUFFER_SPARE: u64 = 10000; //This is items, not bytes.
@@ -104,6 +104,8 @@ impl Renderer {
         }],
     });
 
+    let chunk_buffers = Vec::new();
+
     let depth_texture = Texture::create_depth_texture(&device, &surface_cfg, "Depth texture and stuff");
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -158,15 +160,13 @@ impl Renderer {
       surface_cfg,
       device,
       queue,
-      vertex_buffer,
-      vertex_buffer_items,
-      vertex_buffer_limit,
       depth_texture,
       camera_bind_group,
       camera_buffer,
       pipeline,
       size,
-      world
+      world,
+      chunk_buffers
     })
   }
 
@@ -181,31 +181,8 @@ impl Renderer {
   }
 
   fn update_world_vertices(&mut self) {
-    let verts;
-    let mut world_terrain_update = self.world.lock().unwrap();
-    if let Some(new_verts) = world_terrain_update.get_terrain_vertex_update() {
-      verts = new_verts;
-    } else {
-      return;
-    }
-
-    if verts.len() as u64 > self.vertex_buffer_limit { //Recreate buffer.
-      self.vertex_buffer.destroy();
-
-      let new_limit = verts.len() as u64 + VERTEX_BUFFER_SPARE;
-
-      let new_buffer = self.device.create_buffer(&BufferDescriptor {
-        label: Some("cool vertex buffer 2"),
-        mapped_at_creation: false,
-        size:  new_limit * std::mem::size_of::<WorldVertex>() as u64,
-        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST, //Add some spare space too for more vertices.
-      });
-
-      self.vertex_buffer = new_buffer;
-      self.vertex_buffer_limit = new_limit;
-    }
-    self.vertex_buffer_items = verts.len() as u64; //Update length.
-    self.queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(verts)); //Write buffer. Assuming that the buffer will be written on submit() on the next render call.
+    let world = self.world.lock().unwrap();
+    //todo.
   }
 
   pub fn render(&mut self) -> Result<(), RenderError> {
@@ -267,13 +244,6 @@ impl Renderer {
   }
 }
 
-impl Drop for Renderer {
-  fn drop(&mut self) {
-    //self.vertex_buffer.unmap();
-    self.vertex_buffer.destroy(); //Drop vertex buffer.
-  }
-}
-
 trait Descriptable {
   fn desc<'a>() -> VertexBufferLayout<'a>;
 }
@@ -286,30 +256,30 @@ pub struct CameraUniform {
   pub sun_intensity: f32
 }
 
-impl Descriptable for WorldVertex {
-  fn desc<'a>() -> VertexBufferLayout<'a> {
-    VertexBufferLayout {
-      array_stride: std::mem::size_of::<WorldVertex>() as u64,
-      step_mode: VertexStepMode::Vertex,
-      attributes: &[
-        VertexAttribute { //Position
-          format: VertexFormat::Float32x3,
-          offset: 0,
-          shader_location: 0
-        },
-        VertexAttribute { //UV Mapping (Future)
-          format: VertexFormat::Float32x3,
-          offset: std::mem::size_of::<[f32; 3]>() as u64,
-          shader_location: 1
-        },
-        VertexAttribute { //Vertex normal
-          format: VertexFormat::Float32x3,
-          offset: std::mem::size_of::<[f32; 3]>() as u64 * 2,
-          shader_location: 2
-        }
-      ],
+impl Descriptable for ChunkVertex {
+    fn desc<'a>() -> VertexBufferLayout<'a> {    
+      VertexBufferLayout {
+        array_stride: std::mem::size_of::<WorldVertex>() as u64,
+        step_mode: VertexStepMode::Vertex,
+        attributes: &[
+          VertexAttribute { //Position
+            format: VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0
+          },
+          VertexAttribute { //Colour
+            format: VertexFormat::Float32x3,
+            offset: std::mem::size_of::<[f32; 3]>() as u64,
+            shader_location: 1
+          },
+          VertexAttribute { //Vertex normal
+            format: VertexFormat::Float32x3,
+            offset: std::mem::size_of::<[f32; 3]>() as u64 * 2,
+            shader_location: 2
+          }
+        ],
+      }
     }
-  }
 }
 
 #[derive(Debug)]
@@ -322,4 +292,9 @@ pub enum RendererCreateError {
 #[derive(Debug)]
 pub enum RenderError {
   SurfaceError
+}
+
+struct ChunkBuffer {
+  chunk_id: [isize; 3],
+  chunk_buffer: VertexBuffer<ChunkVertex>
 }
