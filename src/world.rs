@@ -3,7 +3,7 @@ use std::time::Instant;
 use cgmath::{Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
-use self::{player::Player, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain};
+use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain};
 
 mod block;
 mod player;
@@ -24,11 +24,14 @@ pub struct World {
 
 impl World {
   pub fn new() -> Self {
-    let player_pos: [f32; 3] = [128.0, 40.0, 128.0];
+    let player_pos = PlayerPosition {
+        block_int: [128, 40, 128].into(),
+        block_dec: [0.0; 3].into(),
+    };
     
     let player = Player::new(player_pos.into());
     
-    let terrain = ChunkedTerrain::new(player.position.into() as [f64; 3], 64);
+    let terrain = ChunkedTerrain::new(player.position, 64);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 

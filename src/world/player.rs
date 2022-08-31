@@ -1,20 +1,28 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, ops::{Add, AddAssign}};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
 
 use crate::stolen::projection;
 
 const DEFAULT_FOV:f32 = 75.0;
 
 pub struct Player {
-  pub position: Point3<f64>,
+  pub position: PlayerPosition,
   yaw: Rad<f32>,
   pitch: Rad<f32>,
   pub fov: f32
 }
 
+/// The PlayerPosition is a fixed point integer because it is useful to not use accuracy at large distances (unlike floats).
+#[repr(C)] //Repr(c) because this is being sent to GPU.
+#[derive(Clone, Copy)]
+pub struct PlayerPosition {
+  pub block_int: Point3<i32>, //The block integer.
+  pub block_dec: Point3<f32> //The decimal part.
+}
+
 impl Player {
-  pub fn new(position: Point3<f64>) -> Self {
+  pub fn new(position: PlayerPosition) -> Self {
     Self {
       position,
       yaw: Rad(0.0),
@@ -23,10 +31,11 @@ impl Player {
     }
   }
 
+  ///Gets the player view matrix relative to the nearest block. Conversions on integers still need to be done on the GPU.
   pub fn get_view_matrix(&self, aspect_ratio: f32) -> Matrix4<f32> {
     let rotation = self.get_rotation_matrix();
-    let view = Matrix4::look_to_lh(self.position, rotation.z, rotation.y);
-    let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 400.0);
+    let view = Matrix4::look_to_lh(self.position.block_dec, rotation.z, rotation.y);
+    let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 400.0); //Very very far far plane.
 
     projection * view
   }
@@ -42,4 +51,21 @@ impl Player {
   pub fn get_rotation_matrix(&self) -> Matrix3<f32> {
     Matrix3::from_angle_y(self.yaw) * Matrix3::from_angle_x(self.pitch)
   }
+}
+
+impl Add<Vector3<f32>> for PlayerPosition {
+    type Output = PlayerPosition;
+
+    fn add(mut self, rhs: Vector3<f32>) -> Self::Output {
+      self += rhs; //Use the AddAssign trait implemented below.
+      self
+    }
+}
+
+impl AddAssign<Vector3<f32>> for PlayerPosition {
+    fn add_assign(&mut self, rhs: Vector3<f32>) {
+        let added_float = self.block_dec + rhs;
+        self.block_int = self.block_int.zip(added_float, |s, t| s + t.trunc() as i32); //Add integer components.
+        self.block_dec = added_float.map(|v| v.fract()); //Add decimal components.
+    }
 }

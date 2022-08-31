@@ -1,10 +1,70 @@
 mod texture;
 mod vertex_buffer;
 
-use std::{fs::File, io::Read, borrow::Cow};
+use std::{fs::File, io::Read, borrow::Cow, sync::mpsc::Receiver};
 
 use bytemuck_derive::{Pod, Zeroable};
-use wgpu::{Instance, Backends, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Device, Queue, BufferUsages, VertexBufferLayout, VertexAttribute, Buffer, ShaderModuleDescriptor, ShaderSource, RenderPipelineDescriptor, FragmentState, VertexState, MultisampleState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, RenderPipeline, Surface, ColorTargetState, ColorWrites, BlendState, SurfaceConfiguration, PresentMode, TextureUsages, RenderPassDescriptor, RenderPassColorAttachment, Operations, Color, CommandEncoderDescriptor, VertexStepMode, VertexFormat, BufferDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindGroup, DepthStencilState, CompareFunction, StencilState, DepthBiasState, RenderPassDepthStencilAttachment, LoadOp, TextureSampleType, SamplerBindingType, TextureViewDimension, BindingResource};
+//these imports are not a joke wtf
+use wgpu::{
+  Instance,
+  Backends,
+  RequestAdapterOptions,
+  PowerPreference,
+  DeviceDescriptor,
+  Device,
+  Queue,
+  BufferUsages,
+  VertexBufferLayout,
+  VertexAttribute,
+  Buffer,
+  ShaderModuleDescriptor,
+  ShaderSource,
+  RenderPipelineDescriptor,
+  FragmentState,
+  VertexState,
+  MultisampleState,
+  PipelineLayoutDescriptor,
+  PrimitiveState,
+  PrimitiveTopology,
+  FrontFace,
+  Face,
+  PolygonMode,
+  RenderPipeline,
+  Surface,
+  ColorTargetState,
+  ColorWrites,
+  BlendState,
+  SurfaceConfiguration,
+  PresentMode,
+  TextureUsages,
+  RenderPassDescriptor,
+  RenderPassColorAttachment,
+  Operations,
+  Color,
+  CommandEncoderDescriptor,
+  VertexStepMode,
+  VertexFormat,
+  BufferDescriptor,
+  BindGroupLayoutDescriptor,
+  BindGroupLayoutEntry,
+  ShaderStages,
+  BindingType,
+  BufferBindingType,
+  BindGroupDescriptor,
+  BindGroupEntry,
+  BindGroup,
+  DepthStencilState,
+  CompareFunction,
+  StencilState,
+  DepthBiasState,
+  RenderPassDepthStencilAttachment,
+  LoadOp,
+  TextureSampleType,
+  SamplerBindingType,
+  TextureViewDimension,
+  BindingResource
+};
+
 use winit::{window::Window, dpi::PhysicalSize};
 
 use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
@@ -23,13 +83,14 @@ pub struct Renderer {
   size: PhysicalSize<u32>,
   world: ArcWorld,
   chunk_buffers: Vec<ChunkBuffer>, //TODO optimise storage so it can be updated more quickly.
+  chunk_reciever: Receiver<Vec<ChunkVertex>>
 }
 
 const VERTEX_BUFFER_SPARE: u64 = 10000; //This is items, not bytes.
 
 
 impl Renderer {
-  pub async fn new(window: &Window, world: ArcWorld) -> Result<Self, RendererCreateError> {
+  pub async fn new(window: &Window, world: ArcWorld, chunk_reciever: Receiver<Vec<ChunkVertex>>) -> Result<Self, RendererCreateError> {
     let size = window.inner_size();
     let instance = Instance::new(Backends::PRIMARY);
     let surface = unsafe {instance.create_surface(window) };
@@ -54,16 +115,6 @@ impl Renderer {
     let (device, queue) = adapter.request_device(&DeviceDescriptor {
       ..Default::default() //TODO fix.
     }, None).await.map_err(|_| RendererCreateError::RequestDeviceError)?;
-
-    let vertex_buffer = device.create_buffer(&BufferDescriptor {
-      label: Some("Very cool vertex buffer."),
-      mapped_at_creation: false,
-      size: VERTEX_BUFFER_SPARE * std::mem::size_of::<WorldVertex>() as u64,
-      usage: BufferUsages::VERTEX | BufferUsages::COPY_DST
-    });
-
-    let vertex_buffer_items: u64 = 0;
-    let vertex_buffer_limit: u64 = VERTEX_BUFFER_SPARE;
 
     let mut shader_file = File::open("./shaders/shader.wgsl").map_err(|_| RendererCreateError::ShaderLoadError)?;
     let mut shader: String = String::new();
@@ -123,7 +174,7 @@ impl Renderer {
         bias: DepthBiasState::default(),
     }),
       vertex: VertexState {
-        buffers: &[WorldVertex::desc()],
+        buffers: &[ChunkVertex::desc()],
         entry_point: "vs_main",
         module: &shader_module
       },
@@ -166,7 +217,8 @@ impl Renderer {
       pipeline,
       size,
       world,
-      chunk_buffers
+      chunk_buffers,
+      chunk_reciever
     })
   }
 
@@ -204,37 +256,38 @@ impl Renderer {
       label: Some("very cool command encoder")
     });
 
-    if self.vertex_buffer_items > 0 {
-      let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-        color_attachments: &[Some(RenderPassColorAttachment {
-          ops: Operations {
-            load: LoadOp::Clear(Color {
-              r: 0.5,
-              g: 0.0,
-              b: 0.0,
-              a: 0.0
-            }),
-            store: true
-          },
-          resolve_target: None,
-          view: &view
-        })],
-        label: Some("render pass and stuff"),
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-            view: &self.depth_texture.view,
-            depth_ops: Some(Operations {
-                load: LoadOp::Clear(1.0),
-                store: true,
-            }),
-            stencil_ops: None,
-        })
-      });
+    todo!();
+    // if self.vertex_buffer_items > 0 {
+    //   let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+    //     color_attachments: &[Some(RenderPassColorAttachment {
+    //       ops: Operations {
+    //         load: LoadOp::Clear(Color {
+    //           r: 0.5,
+    //           g: 0.0,
+    //           b: 0.0,
+    //           a: 0.0
+    //         }),
+    //         store: true
+    //       },
+    //       resolve_target: None,
+    //       view: &view
+    //     })],
+    //     label: Some("render pass and stuff"),
+    //     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+    //         view: &self.depth_texture.view,
+    //         depth_ops: Some(Operations {
+    //             load: LoadOp::Clear(1.0),
+    //             store: true,
+    //         }),
+    //         stencil_ops: None,
+    //     })
+    //   });
 
-      render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..self.vertex_buffer_items * std::mem::size_of::<WorldVertex>() as u64));
-      render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-      render_pass.set_pipeline(&self.pipeline);
-      render_pass.draw(0..self.vertex_buffer_items as u32, 0..1);
-    }
+    //   render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..self.vertex_buffer_items * std::mem::size_of::<WorldVertex>() as u64));
+    //   render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+    //   render_pass.set_pipeline(&self.pipeline);
+    //   render_pass.draw(0..self.vertex_buffer_items as u32, 0..1);
+    // }
 
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
@@ -259,7 +312,7 @@ pub struct CameraUniform {
 impl Descriptable for ChunkVertex {
     fn desc<'a>() -> VertexBufferLayout<'a> {    
       VertexBufferLayout {
-        array_stride: std::mem::size_of::<WorldVertex>() as u64,
+        array_stride: std::mem::size_of::<ChunkVertex>() as u64,
         step_mode: VertexStepMode::Vertex,
         attributes: &[
           VertexAttribute { //Position

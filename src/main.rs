@@ -7,6 +7,7 @@ use crate::{renderer::Renderer, world::World};
 mod renderer;
 mod world;
 mod stolen;
+mod chunk_worker_pool;
 
 pub type ArcWorld = Arc<Mutex<World>>;
 

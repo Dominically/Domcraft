@@ -1,13 +1,16 @@
+use std::sync::Mutex;
+
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
 use noise::Perlin;
 
-use super::{block::{Block, BlockSideVisibility, BlockSide, self}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
+use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
 pub struct Chunk {
   chunk_id: [i32; 3],
   blocks: Vec<Block>,
   block_vis: Option<Vec<BlockSideVisibility>>,
+  up_to_date: Mutex<bool>, //Whether the chunk vertices are out of date.
 }
 
 impl Chunk {
@@ -42,6 +45,7 @@ impl Chunk {
       chunk_id,
       blocks,
       block_vis: None,
+      up_to_date: Mutex::new(false)
     }
   }
 
@@ -146,7 +150,14 @@ impl Chunk {
         }
       }
     }
+
+    *self.up_to_date.lock().unwrap() = true; //Mark the chunk as up-to-date.
+
     vertices
+  }
+
+  fn is_up_to_date(&self) -> bool {
+    *self.up_to_date.lock().unwrap()
   }
 }
 

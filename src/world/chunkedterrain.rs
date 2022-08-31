@@ -1,9 +1,9 @@
-use std::ops::Range;
+use std::{ops::Range, sync::{RwLock, Arc}};
 
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 
-use super::chunk::Chunk;
+use super::{chunk::Chunk, player::PlayerPosition};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -18,7 +18,7 @@ pub struct ChunkedTerrain {
 }
 
 impl ChunkedTerrain {
-  pub fn new(player_position: [f64; 3]/*Change player position to fixed precision */, render_distance: u32) -> Self {
+  pub fn new(player_position: PlayerPosition, render_distance: u32) -> Self {
     let chunk_list = generate_chunk_list(player_position, render_distance);
     let generator = Perlin::new();
     let mut columns: Vec<ChunkColumn> = Vec::new();
@@ -43,7 +43,7 @@ impl ChunkedTerrain {
 
       let chunk = Chunk::new(&generator, chunk_id, column.height_map);
 
-      column.chunks.push(chunk);
+      column.chunks.push(Arc::new(RwLock::new(chunk)));
     }
     
     Self {
@@ -56,7 +56,7 @@ impl ChunkedTerrain {
 /// A column of chunks. Includes the heightmap for the chunk.
 struct ChunkColumn {
   pub chunk_id_xz: [i32; 2], //The x and z of the chunk ids.
-  pub chunks: Vec<Chunk>,
+  pub chunks: Vec<Arc<RwLock<Chunk>>>,
   pub height_map: SurfaceHeightmap
 }
 
@@ -79,10 +79,10 @@ impl ChunkColumn {
   }
 }
 
-fn generate_chunk_list(position: [f64; 3], render_distance: u32) -> Vec<[i32; 3]> { //Todo make circular.
+fn generate_chunk_list(position: PlayerPosition, render_distance: u32) -> Vec<[i32; 3]> { //Todo make circular.
   let render_distance = render_distance as i32;
   let mut chunks = Vec::new();
-  let position_chunk = position.map(|val| val as i32/CHUNK_SIZE as i32);
+  let position_chunk = position.block_int.map(|pos| pos/CHUNK_SIZE as i32);
   let boundaries = position_chunk.map(|pos| (pos - render_distance, pos + render_distance)); //TODO prevent rendering of chunks that are outside of world boundaries.
 
   for (cx, cy, cz) in iproduct!(boundaries[0].0 .. boundaries[0].1, boundaries[1].0..boundaries[1].1, boundaries[2].0..boundaries[2].1) {
