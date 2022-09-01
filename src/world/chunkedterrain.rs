@@ -1,9 +1,11 @@
-use std::{ops::Range, sync::{RwLock, Arc}};
+use std::{ops::Range, sync::{RwLock, Arc, mpsc::Sender}};
 
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 
-use super::{chunk::Chunk, player::PlayerPosition};
+use crate::renderer::buffer::GenericBuffer;
+
+use super::{chunk::{Chunk, ChunkMeshData}, player::PlayerPosition, chunk_worker_pool::ChunkType};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -18,8 +20,9 @@ pub struct ChunkedTerrain {
 }
 
 impl ChunkedTerrain {
-  pub fn new(player_position: PlayerPosition, render_distance: u32) -> Self {
+  pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkType>) -> Self {
     let chunk_list = generate_chunk_list(player_position, render_distance);
+    
     let generator = Perlin::new();
     let mut columns: Vec<ChunkColumn> = Vec::new();
     
@@ -50,6 +53,29 @@ impl ChunkedTerrain {
       columns,
       render_distance
     }
+  }
+
+  pub fn get_meshes(&self) -> Vec<([i32; 3], ChunkMeshData)> {
+    let mut meshes = Vec::new();
+    for col in self.columns.iter() {
+      for chunk in col.chunks.iter() {
+        let chunk = chunk.read().unwrap();
+        if let Some(mesh_data) = chunk.get_mesh() {
+          let m = (
+            chunk.get_id(),
+            mesh_data
+          );
+          meshes.push(m);
+        }
+      }
+    }
+
+    meshes
+  }
+  
+  //Call chunk updates.
+  pub fn send_chunk_update() {
+    
   }
 }
 

@@ -1,8 +1,11 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
 
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
 use noise::Perlin;
+use wgpu::{Device, Queue};
+
+use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
@@ -10,7 +13,24 @@ pub struct Chunk {
   chunk_id: [i32; 3],
   blocks: Vec<Block>,
   block_vis: Option<Vec<BlockSideVisibility>>,
-  up_to_date: Mutex<bool>, //Whether the chunk vertices are out of date.
+  mesh: Mutex<Option<ChunkMesh>>
+}
+
+struct ChunkMesh {
+  vertex_buffer: GenericBuffer<ChunkVertex>,
+  index_buffer: GenericBuffer<u32>,
+  update_state: MeshUpdateState
+}
+
+pub struct ChunkMeshData {
+  pub vertex_buffer: (Arc<wgpu::Buffer>, u64),
+  pub index_buffer: (Arc<wgpu::Buffer>, u64),
+}
+
+enum MeshUpdateState {
+  Outdated,
+  Updating,
+  Ready
 }
 
 impl Chunk {
@@ -45,7 +65,7 @@ impl Chunk {
       chunk_id,
       blocks,
       block_vis: None,
-      up_to_date: Mutex::new(false)
+      mesh: Mutex::new(None)
     }
   }
 
@@ -113,12 +133,25 @@ impl Chunk {
     }
   }
 
-  /// Gets the vertices of the chunk. gen_block_vis must be called at least once before this is called.
-  pub fn get_vertices(&self) -> Vec<ChunkVertex> { //Generate a vertex buffer for the chunk.
+  /// Update the vertex buffer. gen_block_vis must be called at least once before this is called.
+  pub fn update_vertices(&self, device: &Device, queue: &Queue) { //Generate a vertex buffer for the chunk.
+    { //Separate scope for mutex lock.
+      let mut mesh_lock = self.mesh.lock().unwrap();
+      //Skip if the mesh is up to date.
+      if let Some(mesh) = mesh_lock.as_mut() {
+        if !matches!(mesh.update_state, MeshUpdateState::Outdated) {
+          return;
+        } else {
+          mesh.update_state = MeshUpdateState::Updating;
+        }
+      }
+    }
+
     let block_vis = self.block_vis.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
+    let mut indices = Vec::new();
     
-    const WINDING_ORDER: [usize; 6] = [0, 1, 2, 2, 3, 0];
+    const WINDING_ORDER: [u32; 6] = [0, 1, 2, 2, 3, 0];
 
     for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.iter().zip(block_vis)) {
       if block_visibility.is_invisible() {continue}; //Skip invisible blocks.
@@ -135,29 +168,59 @@ impl Chunk {
 
         if !block_visibility.get_visible(side) {continue}; //Skip this side if it is not visible.
 
-        let vecs = side.get_face_offset_vectors().map(|vec| {
-          [vec[0] + x as f32, vec[1] + y as f32, vec[2] + z as f32]
-        });
-
         let normal = side.get_face_normal(); //get the face normal.
+        let starting_index = vertices.len() as u32;
+        
+        for winding_index in WINDING_ORDER {
+          let index = starting_index + winding_index;
+          indices.push(index);
+        }
 
-        for vertex in WINDING_ORDER.iter().map(|i| vecs[*i]) {
+        let vecs = side.get_face_offset_vectors().iter().for_each(|vec| {
+          let v_pos = [vec[0] + x as f32, vec[1] + y as f32, vec[2] + z as f32];
           vertices.push(ChunkVertex {
-            relative_position: vertex,
+            relative_position: v_pos,
             colour,
             normal
           });
-        }
+        });
       }
     }
 
-    *self.up_to_date.lock().unwrap() = true; //Mark the chunk as up-to-date.
-
-    vertices
+    //Update buffer with results.
+    {
+      let mut mesh_lock = self.mesh.lock().unwrap();
+      match mesh_lock.as_mut() {
+        Some(mesh) => {
+          mesh.vertex_buffer.update(device, queue, &vertices);
+          mesh.index_buffer.update(device, queue, &indices);
+          mesh.update_state = MeshUpdateState::Ready;
+        },
+        None => {
+          *mesh_lock = Some(
+            ChunkMesh {
+                vertex_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &vertices, 400),
+                index_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &indices, 600),
+                update_state: MeshUpdateState::Ready,
+            }
+          );
+        },
+      }
+    }
   }
 
-  fn is_up_to_date(&self) -> bool {
-    *self.up_to_date.lock().unwrap()
+  //Returns the vertex and index buffer.
+  pub fn get_mesh(&self) -> Option<ChunkMeshData> {
+    self.mesh.lock().unwrap().as_ref().map(|mesh| {
+      ChunkMeshData {
+        vertex_buffer: (mesh.vertex_buffer.get_buffer(), mesh.vertex_buffer.len() as u64),
+        index_buffer: (mesh.index_buffer.get_buffer(), mesh.index_buffer.len() as u64),
+      }
+    }) 
+  }
+
+  pub fn get_id(&self) -> [i32; 3] {
+    self.chunk_id.clone()
   }
 }
 

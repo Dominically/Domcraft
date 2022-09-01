@@ -1,15 +1,16 @@
-use std::time::Instant;
+use std::{time::Instant, sync::mpsc::Sender};
 
 use cgmath::{Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
-use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain};
+use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkType};
 
 mod block;
 mod player;
 mod controls;
 pub mod chunkedterrain;
 pub mod chunk;
+pub mod chunk_worker_pool;
 
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.
@@ -23,7 +24,7 @@ pub struct World {
 
 
 impl World {
-  pub fn new() -> Self {
+  pub fn new(worker_pool_sender: Sender<ChunkType>) -> Self {
     let player_pos = PlayerPosition {
         block_int: [128, 40, 128].into(),
         block_dec: [0.0; 3].into(),
@@ -31,7 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let terrain = ChunkedTerrain::new(player.position, 64);
+    let terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
@@ -87,5 +88,9 @@ impl World {
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {
     self.controller.set_key(key, state);
+  }
+
+  pub fn get_terrain(&self) -> &ChunkedTerrain {
+    &self.terrain
   }
 }

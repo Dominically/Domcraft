@@ -1,13 +1,13 @@
-use std::sync::{Mutex, Arc};
+use std::{sync::{Mutex, Arc, mpsc::channel}, thread};
 
-use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState}, dpi::LogicalPosition};
+use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState}};
+use world::chunk_worker_pool;
 
 use crate::{renderer::Renderer, world::World};
 
 mod renderer;
 mod world;
 mod stolen;
-mod chunk_worker_pool;
 
 pub type ArcWorld = Arc<Mutex<World>>;
 
@@ -17,12 +17,36 @@ fn main() {
 }
 
 async fn run() {
-  let world = Arc::new(Mutex::new(World::new()));
+  
+
   let event_loop = EventLoop::new();
   let window = WindowBuilder::new()
     .with_title("DomCraft [INDEV]").build(&event_loop).expect("Failed to create window!");
-  let mut renderer = Renderer::new(&window, world.clone()).await.unwrap();
+  let mut renderer = Renderer::new(&window).await.unwrap();
+
+
+  let (worker_tx, worker_rx) = channel();
+
+  let rx_arc = Arc::new(Mutex::new(worker_rx));
+  let (device, queue) = renderer.get_device_queue();
+  for _ in 0..num_cpus::get() { //Spawn worker threads.
+    let (device, queue, rx_arc) = (
+      device.clone(),
+      queue.clone(),
+      rx_arc.clone()
+    );
+    thread::spawn(move || {
+      chunk_worker_pool::run_worker_pool(device, queue, rx_arc)
+    });
+  }
+
+  let world = Arc::new(Mutex::new(World::new(worker_tx)));
+
+  renderer.bind_world(world.clone());
+  println!("Done making world.");
   
+  println!("Bound world");
+
   window.set_cursor_visible(false);
 
   let mut is_focused = true;
