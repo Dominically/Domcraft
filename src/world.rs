@@ -32,7 +32,8 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
+    let mut terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
+    terrain.gen_block_vis();
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
@@ -63,6 +64,10 @@ impl World {
     self.player.get_view_matrix(aspect_ratio)
   }
 
+  pub fn get_player_pos(&self) -> PlayerPosition {
+    self.player.position.clone()
+  }
+
   pub fn mouse_move(&mut self, delta: (f64, f64)) {
     self.player.rotate_camera(MOUSE_SENS * delta.0 as f32, MOUSE_SENS * delta.1 as f32);
   }
@@ -84,6 +89,7 @@ impl World {
 
     let displacement = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED * delta_secs;
     self.player.position += displacement;
+    self.terrain.send_chunk_update();
   }
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {

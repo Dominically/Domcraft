@@ -59,15 +59,12 @@ use wgpu::{
   DepthBiasState,
   RenderPassDepthStencilAttachment,
   LoadOp,
-  TextureSampleType,
-  SamplerBindingType,
-  TextureViewDimension,
-  BindingResource, IndexFormat
+  IndexFormat
 };
 
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
+use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::{texture::Texture, }};
 
 pub struct Renderer {
   surface: Surface,
@@ -220,7 +217,7 @@ impl Renderer {
 
   pub fn get_device_queue(&self) -> (Arc<Device>, Arc<Queue>) {
     (self.device.clone(), self.queue.clone())
-  } 
+  }
 
   pub fn resize(&mut self, size: PhysicalSize<u32>) {
     if size.width > 32 && size.height > 32 {
@@ -244,14 +241,17 @@ impl Renderer {
         },
     };
 
-    let view_mat = {
-      world.lock().unwrap().get_player_view(self.size.width as f32/self.size.height as f32)
+    let (view_mat, player_pos) = {
+      let world_lock = world.lock().unwrap();
+      (world_lock.get_player_view(self.size.width as f32/self.size.height as f32), world_lock.get_player_pos())
     };
 
     let camera_view = CameraUniform {
       view: view_mat.into(),
+      player_position: player_pos.block_int.into(),
       sun_intensity: 1.0,
-      sun_normal: [-0.20265, 0.97566, 0.08378]
+      sun_normal: [-0.20265, 0.97566, 0.08378],
+      padding: 0u32
     };
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
 
@@ -291,11 +291,19 @@ impl Renderer {
       });
     }
 
-    for (chunk_mesh, data) in chunk_list {
-      if data.index_buffer.1 == 0 {continue} //Skip if the index buffer is empty.
+    //Iterate chunks while skipping empty buffers.
+    for (_, data) in chunk_list.into_iter().filter(|(_, data)| data.index_buffer.1 > 0) {
+
       let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
         label: None,
-        color_attachments: &[],
+        color_attachments: &[Some(RenderPassColorAttachment {
+          ops: Operations {
+            load: LoadOp::Load,
+            store: true
+          },
+          resolve_target: None,
+          view: &view
+        })],
         depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
           view: &self.depth_texture.view,
           depth_ops: Some(Operations {
@@ -308,8 +316,9 @@ impl Renderer {
 
       render_pass.set_vertex_buffer(0, data.vertex_buffer.0.slice(..data.vertex_buffer.1 * size_of::<ChunkVertex>() as u64));
       render_pass.set_index_buffer(data.index_buffer.0.slice(..data.index_buffer.1 * size_of::<u32>() as u64), IndexFormat::Uint32);
+      render_pass.set_bind_group(0, &self.camera_bind_group, &[]); //Set player and camera uniform./Chunk uniform group
       render_pass.set_pipeline(&self.pipeline);
-      render_pass.draw(0..data.vertex_buffer.1 as u32, 0..1);
+      render_pass.draw_indexed(0..data.index_buffer.1 as u32, 0, 0..1);
     }
     // if self.vertex_buffer_items > 0 {
     //   let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -359,8 +368,10 @@ trait Descriptable {
 #[repr(C)]
 pub struct CameraUniform {
   pub view: [[f32; 4]; 4],
+  pub player_position: [i32; 3], //The player position per block.
   pub sun_normal: [f32; 3],
-  pub sun_intensity: f32
+  pub sun_intensity: f32,
+  pub padding: u32 //Make the uniform buffer a size multiple of 8.
 }
 
 impl Descriptable for ChunkVertex {
@@ -369,20 +380,25 @@ impl Descriptable for ChunkVertex {
         array_stride: std::mem::size_of::<ChunkVertex>() as u64,
         step_mode: VertexStepMode::Vertex,
         attributes: &[
-          VertexAttribute { //Position
-            format: VertexFormat::Float32x3,
+          VertexAttribute {
+            format: VertexFormat::Sint32x3,
             offset: 0,
-            shader_location: 0
+            shader_location: 0, //Absolute position.
+          },
+          VertexAttribute { //Relative Position
+            format: VertexFormat::Float32x3,
+            offset: size_of::<[i32; 3]>() as u64,
+            shader_location: 1
           },
           VertexAttribute { //Colour
             format: VertexFormat::Float32x3,
-            offset: std::mem::size_of::<[f32; 3]>() as u64,
-            shader_location: 1
+            offset: size_of::<[i32; 3]>() as u64 + size_of::<[f32; 3]>() as u64,
+            shader_location: 2
           },
           VertexAttribute { //Vertex normal
             format: VertexFormat::Float32x3,
-            offset: std::mem::size_of::<[f32; 3]>() as u64 * 2,
-            shader_location: 2
+            offset: size_of::<[i32; 3]>() as u64 + size_of::<[f32; 3]>() as u64 * 2,
+            shader_location: 3
           }
         ],
       }

@@ -1,6 +1,6 @@
 use std::sync::{mpsc::Receiver, Arc, RwLock, Mutex};
 
-use wgpu::{Queue, Device};
+use wgpu::{Queue, Device, BindGroupLayout};
 
 use super::chunk::Chunk;
 

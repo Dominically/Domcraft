@@ -16,7 +16,8 @@ pub struct GenericBuffer<T: Pod> {
 #[derive(Clone, Copy)]
 pub enum GenericBufferType {
   Vertex,
-  Index
+  Index,
+  Uniform
 }
 
 impl<T: Pod> GenericBuffer<T> {
@@ -28,6 +29,8 @@ impl<T: Pod> GenericBuffer<T> {
     let usage = match typ {
         GenericBufferType::Vertex => BufferUsages::VERTEX,
         GenericBufferType::Index => BufferUsages::INDEX,
+        GenericBufferType::Uniform => BufferUsages::UNIFORM,
+        
     };
 
     let buf = Arc::new(device.create_buffer(&BufferDescriptor {

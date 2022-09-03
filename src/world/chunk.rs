@@ -1,4 +1,4 @@
-use std::sync::{Mutex, Arc};
+use std::{sync::{Mutex, Arc}, ops::Range};
 
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
@@ -19,7 +19,7 @@ pub struct Chunk {
 struct ChunkMesh {
   vertex_buffer: GenericBuffer<ChunkVertex>,
   index_buffer: GenericBuffer<u32>,
-  update_state: MeshUpdateState
+  update_state: MeshUpdateState,
 }
 
 pub struct ChunkMeshData {
@@ -50,9 +50,9 @@ impl Chunk {
         chunk_pos[2] + z as i32
       ];
 
-      let block = if actual_pos[2] == surface_level { //Surface
+      let block = if actual_pos[1] == surface_level { //Surface
         Block::Grass
-      } else if actual_pos[2] < surface_level {
+      } else if actual_pos[1] < surface_level {
         Block::Stone
       } else {
         Block::Air
@@ -70,9 +70,11 @@ impl Chunk {
   }
 
   /// Gets the block at the chunk-relative location. 
-  pub fn get_block_at(&self, x: usize, y: usize, z: usize) -> Option<Block> {
+  pub fn get_block_at(&self, x: isize, y: isize, z: isize) -> Option<Block> {
+    const CHUNK_SIZE:isize = 16isize;
+    const CHUNK_RANGE: Range<isize> = 0..CHUNK_SIZE;
     if CHUNK_RANGE.contains(&x) && CHUNK_RANGE.contains(&y) && CHUNK_RANGE.contains(&z) {
-      Some(*self.blocks.get(x*CHUNK_SIZE*CHUNK_SIZE + y*CHUNK_SIZE + z).unwrap())
+      Some(*self.blocks.get((x*CHUNK_SIZE*CHUNK_SIZE + y*CHUNK_SIZE + z) as usize).unwrap())
     } else {
       None
     }
@@ -80,6 +82,7 @@ impl Chunk {
 
   /// Gets the surrounding blocks, or none if they are out of bounds.
   pub fn get_surrounding_blocks_of(&self, x: usize, y: usize, z: usize) -> [Option<Block>; 6] {
+    let [x, y, z] = [x as isize, y as isize, z as isize];
     [
       self.get_block_at(x+1, y, z),
       self.get_block_at(x-1, y, z),
@@ -118,7 +121,7 @@ impl Chunk {
                 BlockSide::Front => [x, y, CHUNK_SIZE - 1],
               };
               
-              let block: Option<Block> = adjacent_chunks[index].and_then(|chunk| chunk.get_block_at(rel_pos[0], rel_pos[1], rel_pos[2]));
+              let block: Option<Block> = adjacent_chunks[index].and_then(|chunk| chunk.get_block_at(rel_pos[0] as isize, rel_pos[1] as isize, rel_pos[2] as isize));
 
               let translucent = match block {
                 Some(block) => block.is_translucent(),
@@ -131,6 +134,8 @@ impl Chunk {
       }
       surface_visibility.push(vis);
     }
+    
+    self.block_vis = Some(surface_visibility);
   }
 
   /// Update the vertex buffer. gen_block_vis must be called at least once before this is called.
@@ -150,6 +155,7 @@ impl Chunk {
     let block_vis = self.block_vis.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
+    let chunk_pos = self.chunk_id.map(|val| val * CHUNK_SIZE as i32);
     
     const WINDING_ORDER: [u32; 6] = [0, 1, 2, 2, 3, 0];
 
@@ -176,9 +182,11 @@ impl Chunk {
           indices.push(index);
         }
 
-        let vecs = side.get_face_offset_vectors().iter().for_each(|vec| {
+        side.get_face_offset_vectors().iter().for_each(|vec| {
+
           let v_pos = [vec[0] + x as f32, vec[1] + y as f32, vec[2] + z as f32];
           vertices.push(ChunkVertex {
+            absolute_position: chunk_pos.clone(),
             relative_position: v_pos,
             colour,
             normal
@@ -197,10 +205,11 @@ impl Chunk {
           mesh.update_state = MeshUpdateState::Ready;
         },
         None => {
+
           *mesh_lock = Some(
             ChunkMesh {
                 vertex_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &vertices, 400),
-                index_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &indices, 600),
+                index_buffer: GenericBuffer::new(device, queue, GenericBufferType::Index, &indices, 600),
                 update_state: MeshUpdateState::Ready,
             }
           );
@@ -231,6 +240,7 @@ fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 pub struct ChunkVertex {
+  absolute_position: [i32; 3],
   relative_position: [f32; 3],
   colour: [f32; 3],
   normal: [f32; 3]

@@ -17,8 +17,6 @@ fn main() {
 }
 
 async fn run() {
-  
-
   let event_loop = EventLoop::new();
   let window = WindowBuilder::new()
     .with_title("DomCraft [INDEV]").build(&event_loop).expect("Failed to create window!");
