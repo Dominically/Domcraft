@@ -302,7 +302,7 @@ impl Renderer {
         render_pass.draw_indexed(0..data.index_buffer.1 as u32, 0, 0..1);
       }
     }
-    
+
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
     out.present();

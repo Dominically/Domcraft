@@ -35,7 +35,7 @@ enum MeshUpdateState {
 
 impl Chunk {
   /// Generate a new chunk. 
-  pub fn new(gen: &Perlin, chunk_id: [i32; 3], surface_heightmap: SurfaceHeightmap) -> Self {
+  pub fn new(gen: &Perlin, chunk_id: [i32; 3], surface_heightmap: &SurfaceHeightmap) -> Self {
     let chunk_pos = chunk_id.map(|chk| {
       chk*CHUNK_SIZE as i32
     });

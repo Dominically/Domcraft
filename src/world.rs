@@ -32,7 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let mut terrain = ChunkedTerrain::new(player.position, 8, worker_pool_sender);
+    let mut terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
     terrain.gen_block_vis();
     let last_tick = Instant::now();
     let mut controller = Controller::new();
@@ -90,6 +90,10 @@ impl World {
     let displacement = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED * delta_secs;
     self.player.position += displacement;
     self.terrain.send_chunk_update();
+    let updated = self.terrain.update_player_position(&self.player.position);
+    if updated {
+      self.terrain.gen_block_vis();
+    }
   }
 
 

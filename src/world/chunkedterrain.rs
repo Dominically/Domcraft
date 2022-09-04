@@ -1,4 +1,4 @@
-use std::{ops::{Range, Deref}, sync::{RwLock, Arc, mpsc::Sender}, mem, cmp::Ordering};
+use std::{ops::Range, sync::{RwLock, Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
@@ -23,7 +23,7 @@ pub struct ChunkedTerrain {
 
 impl ChunkedTerrain {
   pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkType>) -> Self {
-    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_LENGTH as i32);
+    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE as i32);
     let chunk_id_bounds: [[i32; 3]; 2] = [
       player_chunk_id.map(|chk| chk-render_distance as i32).into(),
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
@@ -37,8 +37,7 @@ impl ChunkedTerrain {
       .map(|(cx, cz)| {
         let mut column = ChunkColumn::new(&gen, [cx, cz]);
         for cy in chunk_id_bounds[0][1]..chunk_id_bounds[1][1] { //Iterate vertically
-          let chunk = Chunk::new(&gen, [cx, cy, cz], column.height_map);
-          column.chunks.push(Arc::new(RwLock::new(chunk)));
+          column.chunks.push(make_new_chunk(&gen, [cx, cy, cz], &column.height_map));
         }
         column
       }).collect();
@@ -54,10 +53,11 @@ impl ChunkedTerrain {
     }
   }
 
-  pub fn update_player_position(&mut self, player_position: PlayerPosition) { //Similar to the new() function but uses existing chunks if necessary.
+  //Returns true if the chunk vertices need to be regenerated.
+  pub fn update_player_position(&mut self, player_position: &PlayerPosition) -> bool { //Similar to the new() function but uses existing chunks if necessary.
     let player_chunk_id: [i32; 3] = player_position.block_int.map(|val| val / CHUNK_SIZE as i32).into();
     if player_chunk_id == self.player_last_chunk_id { //Skip the update if the player has not moved far enough to update the world.
-      return;
+      return false;
     }
 
     let new_bounds: [[i32; 3]; 2] = [
@@ -78,8 +78,73 @@ impl ChunkedTerrain {
       new_bounds[0][0]..new_bounds[1][0],
       new_bounds[0][2]..new_bounds[1][2]
     ) {
+      while matches!(&next_old_column, Some(col) if matches!([col.0.0, col.0.1].cmp(&[ncx, ncz]), Ordering::Less)) { //Skip columns that have already passed.
+        next_old_column = old_column_iter.next();
+      }
+
+      let mut column = match &next_old_column {
+        //Column already exists.
+        Some(col) if [col.0.0, col.0.1] == [ncx, ncz] => {
+          let c = next_old_column.unwrap().1;
+          next_old_column = old_column_iter.next();
+          c
+        },
+        //Create new column.
+        _ => {
+          ChunkColumn::new(&self.gen, [ncx, ncz])
+        },
+      };
+
+      //Variable names for simplicity
+      let old_start = self.chunk_id_bounds[0][1];
+      let old_end = self.chunk_id_bounds[1][1];
+      let new_start = new_bounds[0][1];
+      let new_end = new_bounds[1][1];
+
+      let y_range_size = new_end - new_start;
       
+      let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<RwLock<Chunk>>>::with_capacity(y_range_size as usize));
+
+      if new_start < old_end || new_end > old_start { //If there is an overlap.
+        //Varaible names correspond to arrayshit.png
+        let red = (new_start - old_start).max(0);
+        let green = old_start.max(new_start);
+        let blue = old_end.min(new_end);
+
+        let mut useful_old_chunks = old_chunk_list.into_iter().skip(red as usize);
+
+        for ncy in new_start..green {  
+          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+          column.chunks.push(new_chunk)
+        }
+
+        for _ncy in green..blue {
+          let reused_chunk = useful_old_chunks.next();
+          match reused_chunk {
+            Some(reused_chunk) => column.chunks.push(reused_chunk),
+            None => {
+              panic!("Reused chunk was none.")
+            },
+          }
+          
+        }
+
+        for ncy in blue..new_end {
+          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+          column.chunks.push(new_chunk)
+        }
+
+      } else { //Completely new chunks.
+        for ncy in new_start..new_end {
+          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+          column.chunks.push(new_chunk)
+        }
+      }
+
+      self.columns.push(column);
     }
+
+    true
   }
 
   pub fn get_meshes(&self) -> Vec<([i32; 3], ChunkMeshData)> {
@@ -98,25 +163,6 @@ impl ChunkedTerrain {
     }
 
     meshes
-  }
-
-  pub fn get_column_at_mut(&mut self, column_id: &[i32; 2]) -> Option<&mut ChunkColumn> {
-    let cib = &self.chunk_id_bounds;
-    if (cib[0][0]..cib[1][0]).contains(&column_id[0]) && //Bounds check.
-      (cib[0][2]..cib[1][2]).contains(&column_id[1]) 
-    {
-      let rel_chunk_id = [
-        column_id[0] - cib[0][0],
-        column_id[1] - cib[0][2]
-      ];
-
-      self.columns.get_mut(
-        (rel_chunk_id[0] * (cib[1][0] - cib[0][0]) +
-        rel_chunk_id[1]) as usize
-      )
-    } else {
-      None
-    }
   }
 
   pub fn get_chunk_at(&self, chunk_id: &[i32; 3]) -> Option<&Arc<RwLock<Chunk>>> {
@@ -168,7 +214,6 @@ impl ChunkedTerrain {
         chunk.write().unwrap().gen_block_vis(surrounding_chunk_refs);
       }
     }
-
   }
 
   //Call chunk updates.
@@ -181,6 +226,12 @@ impl ChunkedTerrain {
       }
     }
   }
+}
+
+fn make_new_chunk(gen: &Perlin, chunk_id: [i32; 3], height_map: &SurfaceHeightmap) -> Arc<RwLock<Chunk>> {
+  let new_chunk = Chunk::new(gen, chunk_id, height_map);
+  Arc::new(RwLock::new(new_chunk))
+  
 }
 
 /// A column of chunks. Includes the heightmap for the chunk.
