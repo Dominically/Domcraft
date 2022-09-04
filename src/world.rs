@@ -92,6 +92,7 @@ impl World {
     self.terrain.send_chunk_update();
     let updated = self.terrain.update_player_position(&self.player.position);
     if updated {
+      println!("Block vis gen update.");
       self.terrain.gen_block_vis();
     }
   }

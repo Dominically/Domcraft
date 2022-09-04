@@ -73,7 +73,6 @@ impl ChunkedTerrain {
       self.chunk_id_bounds[0][2]..self.chunk_id_bounds[1][2]
     ).zip(old_columns.into_iter());
     let mut next_old_column = old_column_iter.next(); //Store the next old column.
-
     for (ncx, ncz) in iproduct!(
       new_bounds[0][0]..new_bounds[1][0],
       new_bounds[0][2]..new_bounds[1][2]
@@ -82,68 +81,29 @@ impl ChunkedTerrain {
         next_old_column = old_column_iter.next();
       }
 
-      let mut column = match &next_old_column {
+      let column = match &next_old_column {
         //Column already exists.
         Some(col) if [col.0.0, col.0.1] == [ncx, ncz] => {
-          let c = next_old_column.unwrap().1;
+          let mut column = next_old_column.unwrap().1;
           next_old_column = old_column_iter.next();
-          c
+          self.reuse_column(&mut column, new_bounds, [ncx, ncz]);
+          column
         },
         //Create new column.
         _ => {
-          ChunkColumn::new(&self.gen, [ncx, ncz])
+          let mut column = ChunkColumn::new(&self.gen, [ncx, ncz]);
+          for ncy in new_bounds[0][1]..new_bounds[1][1] {
+            let chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+            column.chunks.push(chunk);
+          }
+          column
         },
       };
-
-      //Variable names for simplicity
-      let old_start = self.chunk_id_bounds[0][1];
-      let old_end = self.chunk_id_bounds[1][1];
-      let new_start = new_bounds[0][1];
-      let new_end = new_bounds[1][1];
-
-      let y_range_size = new_end - new_start;
-      
-      let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<RwLock<Chunk>>>::with_capacity(y_range_size as usize));
-
-      if new_start < old_end || new_end > old_start { //If there is an overlap.
-        //Varaible names correspond to arrayshit.png
-        let red = (new_start - old_start).max(0);
-        let green = old_start.max(new_start);
-        let blue = old_end.min(new_end);
-
-        let mut useful_old_chunks = old_chunk_list.into_iter().skip(red as usize);
-
-        for ncy in new_start..green {  
-          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
-          column.chunks.push(new_chunk)
-        }
-
-        for _ncy in green..blue {
-          let reused_chunk = useful_old_chunks.next();
-          match reused_chunk {
-            Some(reused_chunk) => column.chunks.push(reused_chunk),
-            None => {
-              panic!("Reused chunk was none.")
-            },
-          }
-          
-        }
-
-        for ncy in blue..new_end {
-          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
-          column.chunks.push(new_chunk)
-        }
-
-      } else { //Completely new chunks.
-        for ncy in new_start..new_end {
-          let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
-          column.chunks.push(new_chunk)
-        }
-      }
-
       self.columns.push(column);
     }
 
+    self.chunk_id_bounds = new_bounds; //Update bounds.
+    self.player_last_chunk_id = player_chunk_id;
     true
   }
 
@@ -199,7 +159,14 @@ impl ChunkedTerrain {
           [0, 0, 1],
           [0, 0, -1]
         ].map(|[ox, oy, oz]| {
-          self.get_chunk_at(&[x + ox, y + oy, z + oz]).map(|chk| chk.read().unwrap())
+          let chunk_id = [x + ox, y + oy, z + oz];
+          let chk = self.get_chunk_at(&chunk_id).map(|chk| chk.read().unwrap());
+          if let Some(chk) = &chk {
+            if chk.get_id() != chunk_id {
+              panic!("Found wrong chunk. Expected: {:?} Found: {:?}", chunk_id, chk.get_id())
+            }
+          }
+          chk
         });
 
         //TODO wait for .each to actually become usable.
@@ -211,7 +178,10 @@ impl ChunkedTerrain {
           surrounding_chunk_locks[4].as_deref(),
           surrounding_chunk_locks[5].as_deref(),
         ];
-        chunk.write().unwrap().gen_block_vis(surrounding_chunk_refs);
+        {
+          let mut chunk_write_lock = chunk.write().unwrap();
+          chunk_write_lock.gen_block_vis(surrounding_chunk_refs);
+        }
       }
     }
   }
@@ -223,6 +193,58 @@ impl ChunkedTerrain {
         if chunk.read().unwrap().needs_updating() { //Only update the chunk if it needs it.
           self.worker_pool_sender.send(chunk.clone()).unwrap();
         }
+      }
+    }
+  }
+
+  fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2]) {
+
+    let [ncx, ncz] = column_pos;
+    //Variable names for simplicity
+    let old_start = self.chunk_id_bounds[0][1];
+    let old_end = self.chunk_id_bounds[1][1];
+    let new_start = new_bounds[0][1];
+    let new_end = new_bounds[1][1];
+
+    let y_range_size = new_end - new_start;
+    
+    let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<RwLock<Chunk>>>::with_capacity(y_range_size as usize));
+
+    if new_start < old_end || new_end > old_start { //If there is an overlap.
+      //Varaible names correspond to arrayshit.png
+      let red = (new_start - old_start).max(0);
+      let green = old_start.max(new_start);
+      let blue = old_end.min(new_end);
+
+      let mut useful_old_chunks = old_chunk_list.into_iter().skip(red as usize);
+
+      for ncy in new_start..green {  
+        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        column.chunks.push(new_chunk)
+      }
+
+      for _ncy in green..blue {
+        let reused_chunk = useful_old_chunks.next();
+        match reused_chunk {
+          Some(reused_chunk) => {
+            column.chunks.push(reused_chunk)
+          },
+          None => {
+            panic!("Reused chunk was none.")
+          },
+        }
+        
+      }
+
+      for ncy in blue..new_end {
+        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        column.chunks.push(new_chunk)
+      }
+
+    } else { //Completely new chunks.
+      for ncy in new_start..new_end {
+        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        column.chunks.push(new_chunk)
       }
     }
   }
