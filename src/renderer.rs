@@ -4,6 +4,7 @@ pub mod buffer;
 use std::{fs::File, io::Read, borrow::Cow, sync::Arc, mem::size_of};
 
 use bytemuck_derive::{Pod, Zeroable};
+use itertools::Itertools;
 //these imports are not a joke wtf
 use wgpu::{
   Instance,
@@ -265,7 +266,10 @@ impl Renderer {
     let chunk_list = self.world.as_ref().unwrap().lock().unwrap().get_terrain().get_meshes(); //Get list of chunk meshes.
 
     { //Clear screen.
-      encoder.begin_render_pass(&RenderPassDescriptor {
+      //Filter out empty chunks.
+      let chunk_datas = chunk_list.into_iter().filter_map(|(_, data)| if data.index_buffer.1 > 0 {Some(data)} else {None}).collect_vec();
+
+      let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
         color_attachments: &[Some(RenderPassColorAttachment {
           ops: Operations {
             load: LoadOp::Clear(Color {
@@ -289,69 +293,16 @@ impl Renderer {
           stencil_ops: None,
         }),
       });
-    }
-
-    //Iterate chunks while skipping empty buffers.
-    for (_, data) in chunk_list.into_iter().filter(|(_, data)| data.index_buffer.1 > 0) {
-
-      let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-        label: None,
-        color_attachments: &[Some(RenderPassColorAttachment {
-          ops: Operations {
-            load: LoadOp::Load,
-            store: true
-          },
-          resolve_target: None,
-          view: &view
-        })],
-        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-          view: &self.depth_texture.view,
-          depth_ops: Some(Operations {
-              load: LoadOp::Load,
-              store: true,
-          }),
-          stencil_ops: None,
-        }),
-      });
-
-      render_pass.set_vertex_buffer(0, data.vertex_buffer.0.slice(..data.vertex_buffer.1 * size_of::<ChunkVertex>() as u64));
-      render_pass.set_index_buffer(data.index_buffer.0.slice(..data.index_buffer.1 * size_of::<u32>() as u64), IndexFormat::Uint32);
       render_pass.set_bind_group(0, &self.camera_bind_group, &[]); //Set player and camera uniform./Chunk uniform group
       render_pass.set_pipeline(&self.pipeline);
-      render_pass.draw_indexed(0..data.index_buffer.1 as u32, 0, 0..1);
+
+      for data in chunk_datas.iter(){
+        render_pass.set_vertex_buffer(0, data.vertex_buffer.0.slice(..data.vertex_buffer.1 * size_of::<ChunkVertex>() as u64));
+        render_pass.set_index_buffer(data.index_buffer.0.slice(..data.index_buffer.1 * size_of::<u32>() as u64), IndexFormat::Uint32);
+        render_pass.draw_indexed(0..data.index_buffer.1 as u32, 0, 0..1);
+      }
     }
-    // if self.vertex_buffer_items > 0 {
-    //   let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-    //     color_attachments: &[Some(RenderPassColorAttachment {
-    //       ops: Operations {
-    //         load: LoadOp::Clear(Color my sockets {
-    //           r: 0.5,
-    //           g: 0.0,
-    //           b: 0.0,
-    //           a: 0.0
-    //         }),
-    //         store: true
-    //       },
-    //       resolve_target: None,
-    //       view: &view
-    //     })],
-    //     label: Some("render pass and stuff"),
-    //     depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-    //         view: &self.depth_texture.view,
-    //         depth_ops: Some(Operations {
-    //             load: LoadOp::Clear(1.0),
-    //             store: true crime,
-    //         }),
-    //         stencil_ops: None,
-    //     })
-    //   });
-
-    //   render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..self.vertex_buffer_items * std::mem::size_of::<WorldVertex>() as u64));
-    //   render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-    //   render_pass.set_pipeline(&self.pipeline);
-    //   render_pass.draw(0..self.vertex_buffer_items as u32, 0..1);
-    // }
-
+    
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
     out.present();

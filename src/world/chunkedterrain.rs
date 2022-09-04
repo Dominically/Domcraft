@@ -1,4 +1,4 @@
-use std::{ops::{Range, Deref}, sync::{RwLock, Arc, mpsc::Sender}};
+use std::{ops::{Range, Deref}, sync::{RwLock, Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
@@ -13,30 +13,72 @@ pub const CHUNK_RANGE: Range<usize> = 0..CHUNK_SIZE;
 pub type SurfaceHeightmap = [i32; HEIGHTMAP_SIZE];
 
 pub struct ChunkedTerrain {
-  columns: Vec<ChunkColumn>, //Sorted in x ascending, then z ascending
+  columns: Vec<ChunkColumn>, //Sorted in x ascending, then z ascending,
+  chunk_id_bounds: [[i32; 3]; 2],
+  player_last_chunk_id: [i32; 3], //The last Chunk ID of the player.
   render_distance: u32,
-  worker_pool_sender: Sender<ChunkType>
+  worker_pool_sender: Sender<ChunkType>,
+  gen: Perlin
 }
 
 impl ChunkedTerrain {
   pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkType>) -> Self {
-    let column_list = generate_chunks_and_columns_list(player_position, render_distance);
+    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_LENGTH as i32);
+    let chunk_id_bounds: [[i32; 3]; 2] = [
+      player_chunk_id.map(|chk| chk-render_distance as i32).into(),
+      player_chunk_id.map(|chk| chk+render_distance as i32).into()
+    ];
+
     let gen = Perlin::new();
     
-    let mut columns: Vec<ChunkColumn> = column_list.into_iter().map(|([cx, cz], chunk_ys)| {
-      let mut col = ChunkColumn::new(&gen, [cx, cz]);
-      let chunks: Vec<Arc<RwLock<Chunk>>> = chunk_ys.into_iter().map(|cy| {
-        Arc::new(RwLock::new(Chunk::new(&gen, [cx, cy, cz], col.height_map)))
+    let columns: Vec<ChunkColumn> = iproduct!(
+      chunk_id_bounds[0][0]..chunk_id_bounds[1][0], 
+      chunk_id_bounds[0][2]..chunk_id_bounds[1][2])
+      .map(|(cx, cz)| {
+        let mut column = ChunkColumn::new(&gen, [cx, cz]);
+        for cy in chunk_id_bounds[0][1]..chunk_id_bounds[1][1] { //Iterate vertically
+          let chunk = Chunk::new(&gen, [cx, cy, cz], column.height_map);
+          column.chunks.push(Arc::new(RwLock::new(chunk)));
+        }
+        column
       }).collect();
-
-      col.chunks = chunks;
-      col
-    }).collect();
+    
     
     Self {
       columns,
       render_distance,
-      worker_pool_sender
+      worker_pool_sender,
+      chunk_id_bounds,
+      player_last_chunk_id: player_chunk_id.into(),
+      gen
+    }
+  }
+
+  pub fn update_player_position(&mut self, player_position: PlayerPosition) { //Similar to the new() function but uses existing chunks if necessary.
+    let player_chunk_id: [i32; 3] = player_position.block_int.map(|val| val / CHUNK_SIZE as i32).into();
+    if player_chunk_id == self.player_last_chunk_id { //Skip the update if the player has not moved far enough to update the world.
+      return;
+    }
+
+    let new_bounds: [[i32; 3]; 2] = [
+      player_chunk_id.map(|chk| chk-self.render_distance as i32).into(),
+      player_chunk_id.map(|chk| chk+self.render_distance as i32).into()
+    ];
+
+    let new_columns = Vec::with_capacity(self.render_distance.pow(2) as usize * 2); //Estimate columns by squaring the render distance
+    let old_columns = mem::replace(&mut self.columns, new_columns); //Replace the old column list with the new one.
+
+    let mut old_column_iter = iproduct!( //Create an iterator of old columns.
+      self.chunk_id_bounds[0][0]..self.chunk_id_bounds[1][0],
+      self.chunk_id_bounds[0][2]..self.chunk_id_bounds[1][2]
+    ).zip(old_columns.into_iter());
+    let mut next_old_column = old_column_iter.next(); //Store the next old column.
+
+    for (ncx, ncz) in iproduct!(
+      new_bounds[0][0]..new_bounds[1][0],
+      new_bounds[0][2]..new_bounds[1][2]
+    ) {
+      
     }
   }
 
@@ -58,6 +100,46 @@ impl ChunkedTerrain {
     meshes
   }
 
+  pub fn get_column_at_mut(&mut self, column_id: &[i32; 2]) -> Option<&mut ChunkColumn> {
+    let cib = &self.chunk_id_bounds;
+    if (cib[0][0]..cib[1][0]).contains(&column_id[0]) && //Bounds check.
+      (cib[0][2]..cib[1][2]).contains(&column_id[1]) 
+    {
+      let rel_chunk_id = [
+        column_id[0] - cib[0][0],
+        column_id[1] - cib[0][2]
+      ];
+
+      self.columns.get_mut(
+        (rel_chunk_id[0] * (cib[1][0] - cib[0][0]) +
+        rel_chunk_id[1]) as usize
+      )
+    } else {
+      None
+    }
+  }
+
+  pub fn get_chunk_at(&self, chunk_id: &[i32; 3]) -> Option<&Arc<RwLock<Chunk>>> {
+    let cib = &self.chunk_id_bounds;
+    if (cib[0][0]..cib[1][0]).contains(&chunk_id[0]) && //Bounds check. Again.
+      (cib[0][1]..cib[1][1]).contains(&chunk_id[1]) &&
+      (cib[0][2]..cib[1][2]).contains(&chunk_id[2]) 
+    {
+      let rel_pos = [ //Convert to relative position.
+        chunk_id[0] - cib[0][0],
+        chunk_id[1] - cib[0][1],
+        chunk_id[2] - cib[0][2],
+      ];
+
+      Some(&self.columns[(
+        rel_pos[0] * (cib[1][0] - cib[0][0]) + //relative x * x size + relative z
+        rel_pos[2]
+      ) as usize].chunks[rel_pos[1] as usize])
+    } else {
+      None
+    }
+  }
+
   pub fn gen_block_vis(&mut self) {
     //Generate block visibility.
     for col in self.columns.iter() {
@@ -71,12 +153,7 @@ impl ChunkedTerrain {
           [0, 0, 1],
           [0, 0, -1]
         ].map(|[ox, oy, oz]| {
-          (self.get_column_at(x + ox, z + oz), oy)
-        }).map(|(opt_clmn, oy)|{
-          match opt_clmn { //Mapping didn't work for some reason.
-            Some(clmn) => clmn.get_chunk_at_y(y + oy).map(|chk| chk.read().unwrap()),
-            None => None,
-          }
+          self.get_chunk_at(&[x + ox, y + oy, z + oz]).map(|chk| chk.read().unwrap())
         });
 
         //TODO wait for .each to actually become usable.
@@ -98,77 +175,36 @@ impl ChunkedTerrain {
   pub fn send_chunk_update(&self) {
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
-        self.worker_pool_sender.send(chunk.clone()).unwrap();
+        if chunk.read().unwrap().needs_updating() { //Only update the chunk if it needs it.
+          self.worker_pool_sender.send(chunk.clone()).unwrap();
+        }
       }
     }
-  }
-
-  fn get_column_index(&self, x: i32, z: i32) -> Result<usize, usize>{
-    self.columns.binary_search_by(|col| {
-      col.chunk_id_xz.cmp(&[x, z])
-    })
-  }
-
-  fn get_column_at(&self, x: i32, z: i32) -> Option<&ChunkColumn> {
-    self.get_column_index(x, z).ok().map(|index| self.columns.get(index).unwrap())
   }
 }
 
 /// A column of chunks. Includes the heightmap for the chunk.
 struct ChunkColumn {
-  pub chunk_id_xz: [i32; 2], //The x and z of the chunk ids.
   pub chunks: Vec<Arc<RwLock<Chunk>>>,
   pub height_map: SurfaceHeightmap
 }
 
 impl ChunkColumn {
   fn new(gen: &Perlin, chunk_xz: [i32; 2]) -> Self {
-    let noise_coords = chunk_xz.map(|val| (val*CHUNK_SIZE as i32) as f64 / 10.0);
+    let noise_coords = chunk_xz.map(|val| (val*CHUNK_SIZE as i32) as f64);
+    
     let mut height_map: SurfaceHeightmap = [0i32; HEIGHTMAP_SIZE];
     for ((x,z), hm) in iproduct!(CHUNK_RANGE, CHUNK_RANGE).zip(height_map.iter_mut()) {
       *hm = (gen.get([
-        noise_coords[0] + x as f64,
-        noise_coords[1] + z as f64
+        (noise_coords[0] + x as f64) / 30.0,
+        (noise_coords[1] + z as f64) / 30.0
       ]) * 5.0 + 10.0) as i32;
     }
 
     Self {
-      chunk_id_xz: chunk_xz,
       chunks: Vec::new(),
       height_map
     }
   }
-
-  fn get_chunk_index(&self, y: i32) -> Result<usize, usize> {
-    
-    self.chunks.binary_search_by(|chunk| {
-      let cy = chunk.read().unwrap().get_id()[1];
-      cy.cmp(&y)
-    })
-  }
-
-  pub fn get_chunk_at_y(&self, y: i32) -> Option<&Arc<RwLock<Chunk>>> {
-    self.get_chunk_index(y).ok().map(|index| self.chunks.get(index).unwrap())
-  }
 }
-
-//Generates a list of chunk columns and chunks. Sorted by increasing z, then x (e.g. [0,0], [0,1], [0,2], [1,0], [1,1], etc...).
-fn generate_chunks_and_columns_list(position: PlayerPosition, render_distance: u32) -> Vec<([i32; 2], Vec<i32>)> { //Todo make circular.
-  let render_distance = render_distance as i32;
-  let mut columns = Vec::new();
-  let position_chunk = position.block_int.map(|pos| pos/CHUNK_SIZE as i32);
-  let boundaries = position_chunk.map(|pos| (pos - render_distance, pos + render_distance)); //TODO prevent rendering of chunks that are outside of world boundaries.
-
-  for (cx, cz) in iproduct!(boundaries[0].0..boundaries[0].1, boundaries[2].0..boundaries[2].1) {
-    let mut chunks_list = Vec::new();
-    for cy in boundaries[1].0..boundaries[1].1 {
-      chunks_list.push(cy);
-    }
-    columns.push(([cx, cz], chunks_list));
-  }
-
-  columns
-  
-}
-
  

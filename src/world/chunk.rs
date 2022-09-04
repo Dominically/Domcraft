@@ -2,7 +2,7 @@ use std::{sync::{Mutex, Arc}, ops::Range};
 
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
-use noise::Perlin;
+use noise::{Perlin, NoiseFn};
 use wgpu::{Device, Queue};
 
 use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
@@ -13,13 +13,13 @@ pub struct Chunk {
   chunk_id: [i32; 3],
   blocks: Vec<Block>,
   block_vis: Option<Vec<BlockSideVisibility>>,
-  mesh: Mutex<Option<ChunkMesh>>
+  mesh: Mutex<Option<ChunkMesh>>,
+  mesh_state: Mutex<MeshUpdateState>
 }
 
 struct ChunkMesh {
   vertex_buffer: GenericBuffer<ChunkVertex>,
   index_buffer: GenericBuffer<u32>,
-  update_state: MeshUpdateState,
 }
 
 pub struct ChunkMeshData {
@@ -50,13 +50,20 @@ impl Chunk {
         chunk_pos[2] + z as i32
       ];
 
-      let block = if actual_pos[1] == surface_level { //Surface
+      let noise_value = NoiseFn::<[f64; 3]>::get(gen, actual_pos.map(|val| val as f64 / 60.0));
+      let is_cave = noise_value > 0.5;
+
+      let block = if is_cave {
+        Block::Air
+      } else if actual_pos[1] == surface_level { //Surface
         Block::Grass
       } else if actual_pos[1] < surface_level {
         Block::Stone
       } else {
         Block::Air
       };
+
+      
 
       blocks.push(block);
     }
@@ -65,7 +72,8 @@ impl Chunk {
       chunk_id,
       blocks,
       block_vis: None,
-      mesh: Mutex::new(None)
+      mesh: Mutex::new(None),
+      mesh_state: Mutex::new(MeshUpdateState::Outdated)
     }
   }
 
@@ -138,19 +146,17 @@ impl Chunk {
     self.block_vis = Some(surface_visibility);
   }
 
-  /// Update the vertex buffer. gen_block_vis must be called at least once before this is called.
+  /// Update the vertex buffer. gen_block_vis must be called at least once before this is called. This should only be called if the vertex state is outdated.
   pub fn update_vertices(&self, device: &Device, queue: &Queue) { //Generate a vertex buffer for the chunk.
-    { //Separate scope for mutex lock.
-      let mut mesh_lock = self.mesh.lock().unwrap();
-      //Skip if the mesh is up to date.
-      if let Some(mesh) = mesh_lock.as_mut() {
-        if !matches!(mesh.update_state, MeshUpdateState::Outdated) {
-          return;
-        } else {
-          mesh.update_state = MeshUpdateState::Updating;
-        }
-      }
-    }
+    // { //Separate scope for mutex lock.
+    //   let mut state_lock = self.mesh_state.lock().unwrap();
+    //   match *state_lock {
+    //     MeshUpdateState::Outdated => *state_lock = MeshUpdateState::Updating,
+    //     _ => return //Skip if it is not pending.
+    //   }
+    // }
+
+    *self.mesh_state.lock().unwrap() = MeshUpdateState::Updating;
 
     let block_vis = self.block_vis.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
@@ -161,13 +167,7 @@ impl Chunk {
 
     for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.iter().zip(block_vis)) {
       if block_visibility.is_invisible() {continue}; //Skip invisible blocks.
-  
-      let colour = match block {
-        Block::Stone => [0.5, 0.5, 0.5],
-        Block::Grass => [0.3, 0.7, 0.3],
-        Block::Bedrock => [0.1, 0.1, 0.1],
-        _ => [1.0, 0.0, 1.0], //MISSING COLOUR
-      };
+      let colour = block.get_colour();
 
       for side_i in 0..6 { //Corresponds to BlockSide values.
         let side = BlockSide::try_from(side_i).unwrap();
@@ -202,7 +202,6 @@ impl Chunk {
         Some(mesh) => {
           mesh.vertex_buffer.update(device, queue, &vertices);
           mesh.index_buffer.update(device, queue, &indices);
-          mesh.update_state = MeshUpdateState::Ready;
         },
         None => {
 
@@ -210,11 +209,12 @@ impl Chunk {
             ChunkMesh {
                 vertex_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &vertices, 400),
                 index_buffer: GenericBuffer::new(device, queue, GenericBufferType::Index, &indices, 600),
-                update_state: MeshUpdateState::Ready,
             }
           );
         },
       }
+      
+      *self.mesh_state.lock().unwrap() = MeshUpdateState::Ready; //Set state to ready.
     }
   }
 
@@ -230,6 +230,13 @@ impl Chunk {
 
   pub fn get_id(&self) -> [i32; 3] {
     self.chunk_id.clone()
+  }
+
+  pub fn needs_updating(&self) -> bool {
+    match *self.mesh_state.lock().unwrap() {
+      MeshUpdateState::Outdated => true,
+      _ => false,
+    }
   }
 }
 

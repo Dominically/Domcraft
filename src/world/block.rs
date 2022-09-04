@@ -4,6 +4,8 @@ pub enum Block {
   Stone,
   Grass,
   Bedrock,
+  PinkStuff,
+  YellowStuff,
   Air
 }
 
@@ -12,6 +14,16 @@ impl Block {
     match self {
       Block::Air => true,
       _ => false
+    }
+  }
+
+  pub fn get_colour(&self) -> [f32; 3] {
+    match self {
+      Block::Stone => [0.5, 0.5, 0.5],
+      Block::Grass => [0.3, 0.7, 0.3],
+      Block::Bedrock => [0.1, 0.1, 0.1],
+      Block::YellowStuff => [0.5, 0.5, 0.2],
+      _ => [1.0, 0.0, 1.0], //MISSING COLOUR
     }
   }
 }

@@ -26,13 +26,13 @@ pub struct World {
 impl World {
   pub fn new(worker_pool_sender: Sender<ChunkType>) -> Self {
     let player_pos = PlayerPosition {
-        block_int: [128, 40, 128].into(),
+        block_int: [1, 40, 1].into(),
         block_dec: [0.0; 3].into(),
     };
     
     let player = Player::new(player_pos.into());
     
-    let mut terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
+    let mut terrain = ChunkedTerrain::new(player.position, 8, worker_pool_sender);
     terrain.gen_block_vis();
     let last_tick = Instant::now();
     let mut controller = Controller::new();
@@ -85,12 +85,13 @@ impl World {
       x: x_speed,
       y: y_speed,
       z: z_speed
-    };
+    } * 3.0;
 
     let displacement = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED * delta_secs;
     self.player.position += displacement;
     self.terrain.send_chunk_update();
   }
+
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {
     self.controller.set_key(key, state);
