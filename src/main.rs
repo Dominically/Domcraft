@@ -1,6 +1,6 @@
-use std::{sync::{Mutex, Arc, mpsc::channel}, thread, time::Instant};
+use std::{sync::{Mutex, Arc, mpsc::channel}, thread};
 
-use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState}};
+use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState, VirtualKeyCode}};
 use world::chunk_worker_pool;
 
 use crate::{renderer::Renderer, world::World};
@@ -12,7 +12,7 @@ mod stolen;
 pub type ArcWorld = Arc<Mutex<World>>;
 
 fn main() {
-  println!("Hello, world!");
+  println!("Hello, world!2");
   pollster::block_on(run());
 }
 
@@ -27,14 +27,14 @@ async fn run() {
 
   let rx_arc = Arc::new(Mutex::new(worker_rx));
   let (device, queue) = renderer.get_device_queue();
-  for _ in 0..num_cpus::get() { //Spawn worker threads.
+  for i in 0..num_cpus::get() { //Spawn worker threads.
     let (device, queue, rx_arc) = (
       device.clone(),
       queue.clone(),
       rx_arc.clone()
     );
     thread::spawn(move || {
-      chunk_worker_pool::run_worker_pool(device, queue, rx_arc)
+      chunk_worker_pool::run_worker_pool(device, queue, rx_arc, i)
     });
   }
 
@@ -67,6 +67,10 @@ async fn run() {
             match input.virtual_keycode {
               Some(key) => {
                 let mut world = world.lock().unwrap();
+                if let VirtualKeyCode::Escape = key {
+                  *ctrl = ControlFlow::Exit;
+                  return;
+                }
                 match input.state {
                   ElementState::Pressed => world.key_update(key, true),
                   ElementState::Released => world.key_update(key, false),

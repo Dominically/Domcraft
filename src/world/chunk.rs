@@ -53,7 +53,9 @@ impl Chunk {
       let noise_value = NoiseFn::<[f64; 3]>::get(gen, actual_pos.map(|val| val as f64 / 60.0));
       let is_cave = noise_value > 0.5;
 
-      let block = if is_cave {
+      let block = if chunk_id[0] == 0 && chunk_id[2] == 0 {
+        Block::Air
+      } else if is_cave {
         Block::Air
       } else if actual_pos[1] == surface_level { //Surface
         Block::Grass
@@ -148,14 +150,9 @@ impl Chunk {
 
   /// Update the vertex buffer. gen_block_vis must be called at least once before this is called. This should only be called if the vertex state is outdated.
   pub fn update_vertices(&self, device: &Device, queue: &Queue) { //Generate a vertex buffer for the chunk.
-    // { //Separate scope for mutex lock.
-    //   let mut state_lock = self.mesh_state.lock().unwrap();
-    //   match *state_lock {
-    //     MeshUpdateState::Outdated => *state_lock = MeshUpdateState::Updating,
-    //     _ => return //Skip if it is not pending.
-    //   }
-    // }
-
+    if !self.needs_updating() {
+      return; //Skip if chunk does not need updating.
+    }
     *self.mesh_state.lock().unwrap() = MeshUpdateState::Updating;
 
     let block_vis = self.block_vis.as_ref().expect("Please call gen_block_vis before generating vertices.");

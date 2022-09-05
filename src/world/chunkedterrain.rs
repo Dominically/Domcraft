@@ -104,7 +104,12 @@ impl ChunkedTerrain {
 
     self.chunk_id_bounds = new_bounds; //Update bounds.
     self.player_last_chunk_id = player_chunk_id;
+
+    let chunk_count = self.columns.iter().map(|col| col.chunks.len()).reduce(|total, count| total+count);
+    println!("New chunk count: {:?}", chunk_count);
+
     true
+
   }
 
   pub fn get_meshes(&self) -> Vec<([i32; 3], ChunkMeshData)> {
@@ -191,6 +196,7 @@ impl ChunkedTerrain {
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
         if chunk.read().unwrap().needs_updating() { //Only update the chunk if it needs it.
+          //println!("Sending chunk");
           self.worker_pool_sender.send(chunk.clone()).unwrap();
         }
       }

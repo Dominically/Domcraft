@@ -89,12 +89,11 @@ impl World {
 
     let displacement = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED * delta_secs;
     self.player.position += displacement;
-    self.terrain.send_chunk_update();
     let updated = self.terrain.update_player_position(&self.player.position);
     if updated {
-      println!("Block vis gen update.");
       self.terrain.gen_block_vis();
     }
+    self.terrain.send_chunk_update();
   }
 
 

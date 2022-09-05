@@ -296,6 +296,8 @@ impl Renderer {
       render_pass.set_bind_group(0, &self.camera_bind_group, &[]); //Set player and camera uniform./Chunk uniform group
       render_pass.set_pipeline(&self.pipeline);
 
+      // println!("Rendering: {} chunks.", chunk_datas.len());
+
       for data in chunk_datas.iter(){
         render_pass.set_vertex_buffer(0, data.vertex_buffer.0.slice(..data.vertex_buffer.1 * size_of::<ChunkVertex>() as u64));
         render_pass.set_index_buffer(data.index_buffer.0.slice(..data.index_buffer.1 * size_of::<u32>() as u64), IndexFormat::Uint32);
