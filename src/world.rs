@@ -14,7 +14,7 @@ pub mod chunk_worker_pool;
 
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.
-const NOCLIP_SPEED: f32 = 5.0; //blocks/sec
+const NOCLIP_SPEED: f32 = 40.0; //blocks/sec
 pub struct World {
   terrain: ChunkedTerrain,
   player: Player,
@@ -32,7 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let mut terrain = ChunkedTerrain::new(player.position, 4, worker_pool_sender);
+    let mut terrain = ChunkedTerrain::new(player_pos, 4, worker_pool_sender);
     terrain.gen_block_vis();
     let last_tick = Instant::now();
     let mut controller = Controller::new();
@@ -65,7 +65,7 @@ impl World {
   }
 
   pub fn get_player_pos(&self) -> PlayerPosition {
-    self.player.position.clone()
+    self.player.get_position()
   }
 
   pub fn mouse_move(&mut self, delta: (f64, f64)) {
@@ -74,7 +74,7 @@ impl World {
 
   pub fn tick(&mut self) {
     let now = Instant::now();
-    let delta_secs = (now - self.last_tick).as_secs_f32();
+    let delta_secs = now - self.last_tick;
     self.last_tick = now;
 
     let x_speed = self.controller.get_action_value((Control::Left, -1.0), (Control::Right, 1.0), 0.0);
@@ -85,11 +85,11 @@ impl World {
       x: x_speed,
       y: y_speed,
       z: z_speed
-    } * 3.0;
+    };
 
-    let displacement = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED * delta_secs;
-    self.player.position += displacement;
-    let updated = self.terrain.update_player_position(&self.player.position);
+    let accel = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED ;
+    self.player.tick_position(&accel, &delta_secs);
+    let updated = self.terrain.update_player_position(&self.player.get_position());
     if updated {
       self.terrain.gen_block_vis();
     }

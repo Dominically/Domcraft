@@ -1,13 +1,15 @@
-use std::{f32::consts::PI, ops::{Add, AddAssign}};
+use std::{f32::consts::PI, ops::{Add, AddAssign}, time::Duration};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, InnerSpace};
 
 use crate::stolen::projection;
 
-const DEFAULT_FOV:f32 = 75.0;
+const SPEED_FACTOR: f32 = 0.5;
+const DEFAULT_FOV: f32 = 75.0;
 
 pub struct Player {
-  pub position: PlayerPosition,
+  position: PlayerPosition,
+  velocity: Vector3<f32>,
   yaw: Rad<f32>,
   pitch: Rad<f32>,
   pub fov: f32
@@ -25,6 +27,7 @@ impl Player {
   pub fn new(position: PlayerPosition) -> Self {
     Self {
       position,
+      velocity: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
       yaw: Rad(0.0),
       pitch: Rad(0.0),
       fov: DEFAULT_FOV
@@ -50,6 +53,19 @@ impl Player {
 
   pub fn get_rotation_matrix(&self) -> Matrix3<f32> {
     Matrix3::from_angle_y(self.yaw) * Matrix3::from_angle_x(self.pitch)
+  }
+
+  pub fn get_position(&self) -> PlayerPosition {
+    self.position.clone()
+  }
+
+  pub fn tick_position(&mut self, target_vel: &Vector3<f32>, dt: &Duration) {
+    let diff = target_vel - self.velocity;
+    let secs = dt.as_secs_f32();
+    let factor = secs/(secs + SPEED_FACTOR);
+    self.velocity += diff * factor;
+    self.position += self.velocity * secs;
+
   }
 }
 
