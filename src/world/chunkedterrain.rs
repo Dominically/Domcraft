@@ -37,7 +37,7 @@ impl ChunkedTerrain {
       .map(|(cx, cz)| {
         let mut column = ChunkColumn::new(&gen, [cx, cz]);
         for cy in chunk_id_bounds[0][1]..chunk_id_bounds[1][1] { //Iterate vertically
-          column.chunks.push(make_new_chunk(&gen, [cx, cy, cz], &column.height_map));
+          column.chunks.push(make_new_chunk([cx, cy, cz]));
         }
         column
       }).collect();
@@ -93,7 +93,7 @@ impl ChunkedTerrain {
         _ => {
           let mut column = ChunkColumn::new(&self.gen, [ncx, ncz]);
           for ncy in new_bounds[0][1]..new_bounds[1][1] {
-            let chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+            let chunk = make_new_chunk([ncx, ncy, ncz]);
             column.chunks.push(chunk);
           }
           column
@@ -109,15 +109,13 @@ impl ChunkedTerrain {
     println!("New chunk count: {:?}", chunk_count);
 
     true
-
   }
 
   pub fn get_meshes(&self) -> Vec<([i32; 3], ChunkMeshData)> {
     let mut meshes = Vec::new();
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
-        let chunk = chunk.read().unwrap();
-        if let Some(mesh_data) = chunk.get_mesh() {
+        if let Some(mesh_data) = chunk.get_mesh_fast() {
           let m = (
             chunk.get_id(),
             mesh_data
@@ -130,7 +128,7 @@ impl ChunkedTerrain {
     meshes
   }
 
-  pub fn get_chunk_at(&self, chunk_id: &[i32; 3]) -> Option<&Arc<RwLock<Chunk>>> {
+  pub fn get_chunk_at(&self, chunk_id: &[i32; 3]) -> Option<&Arc<Chunk>> {
     let cib = &self.chunk_id_bounds;
     if (cib[0][0]..cib[1][0]).contains(&chunk_id[0]) && //Bounds check. Again.
       (cib[0][1]..cib[1][1]).contains(&chunk_id[1]) &&
@@ -152,10 +150,11 @@ impl ChunkedTerrain {
   }
 
   pub fn gen_block_vis(&mut self) {
+    todo!();
     //Generate block visibility.
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
-        let [x, y, z] = chunk.read().unwrap().get_id();
+        let [x, y, z] = chunk.get_id();
         let surrounding_chunk_locks = [
           [1i32, 0, 0],
           [-1, 0, 0],
@@ -214,7 +213,7 @@ impl ChunkedTerrain {
 
     let y_range_size = new_end - new_start;
     
-    let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<RwLock<Chunk>>>::with_capacity(y_range_size as usize));
+    let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<Chunk>>::with_capacity(y_range_size as usize));
 
     if new_start < old_end || new_end > old_start { //If there is an overlap.
       //Varaible names correspond to arrayshit.png
@@ -225,7 +224,7 @@ impl ChunkedTerrain {
       let mut useful_old_chunks = old_chunk_list.into_iter().skip(red as usize);
 
       for ncy in new_start..green {  
-        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
 
@@ -243,28 +242,28 @@ impl ChunkedTerrain {
       }
 
       for ncy in blue..new_end {
-        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
 
     } else { //Completely new chunks.
       for ncy in new_start..new_end {
-        let new_chunk = make_new_chunk(&self.gen, [ncx, ncy, ncz], &column.height_map);
+        let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
     }
   }
 }
 
-fn make_new_chunk(gen: &Perlin, chunk_id: [i32; 3], height_map: &SurfaceHeightmap) -> Arc<RwLock<Chunk>> {
-  let new_chunk = Chunk::new(gen, chunk_id, height_map);
-  Arc::new(RwLock::new(new_chunk))
+fn make_new_chunk(chunk_id: [i32; 3]) -> Arc<Chunk> {
+  let new_chunk = Chunk::new(chunk_id);
+  Arc::new(new_chunk)
   
 }
 
 /// A column of chunks. Includes the heightmap for the chunk.
 struct ChunkColumn {
-  pub chunks: Vec<Arc<RwLock<Chunk>>>,
+  pub chunks: Vec<Arc<Chunk>>,
   pub height_map: SurfaceHeightmap
 }
 
