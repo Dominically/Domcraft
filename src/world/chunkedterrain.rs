@@ -1,9 +1,9 @@
-use std::{ops::Range, sync::{RwLock, Arc, mpsc::Sender}, mem, cmp::Ordering};
+use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 
-use super::{chunk::{Chunk, ChunkMeshData}, player::PlayerPosition, chunk_worker_pool::ChunkType};
+use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -17,19 +17,19 @@ pub struct ChunkedTerrain {
   chunk_id_bounds: [[i32; 3]; 2],
   player_last_chunk_id: [i32; 3], //The last Chunk ID of the player.
   render_distance: u32,
-  worker_pool_sender: Sender<ChunkType>,
-  gen: Perlin
+  worker_pool_sender: Sender<ChunkTask>,
+  gen: Arc<Perlin>
 }
 
 impl ChunkedTerrain {
-  pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkType>) -> Self {
+  pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkTask>) -> Self {
     let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE as i32);
     let chunk_id_bounds: [[i32; 3]; 2] = [
       player_chunk_id.map(|chk| chk-render_distance as i32).into(),
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
     ];
 
-    let gen = Perlin::new();
+    let gen = Arc::new(Perlin::new());
     
     let columns: Vec<ChunkColumn> = iproduct!(
       chunk_id_bounds[0][0]..chunk_id_bounds[1][0], 
@@ -105,9 +105,6 @@ impl ChunkedTerrain {
     self.chunk_id_bounds = new_bounds; //Update bounds.
     self.player_last_chunk_id = player_chunk_id;
 
-    let chunk_count = self.columns.iter().map(|col| col.chunks.len()).reduce(|total, count| total+count);
-    println!("New chunk count: {:?}", chunk_count);
-
     true
   }
 
@@ -149,56 +146,51 @@ impl ChunkedTerrain {
     }
   }
 
-  pub fn gen_block_vis(&mut self) {
-    todo!();
-    //Generate block visibility.
+  //Call chunk updates.
+  pub fn tick_progress(&self) {
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
-        let [x, y, z] = chunk.get_id();
-        let surrounding_chunk_locks = [
-          [1i32, 0, 0],
-          [-1, 0, 0],
-          [0, 1, 0],
-          [0, -1, 0],
-          [0, 0, 1],
-          [0, 0, -1]
-        ].map(|[ox, oy, oz]| {
-          let chunk_id = [x + ox, y + oy, z + oz];
-          let chk = self.get_chunk_at(&chunk_id).map(|chk| chk.read().unwrap());
-          if let Some(chk) = &chk {
-            if chk.get_id() != chunk_id {
-              panic!("Found wrong chunk. Expected: {:?} Found: {:?}", chunk_id, chk.get_id())
+        let stage = chunk.get_pending_stage();
+        match stage {
+          Some(ChunkStateStage::ChunkGen) => {
+            self.send_task(ChunkTask {
+              chunk: chunk.clone(),
+              typ: ChunkTaskType::GenTerrain(self.gen.clone(), col.height_map.clone()),
+            });
+          },
+          Some(ChunkStateStage::ChunkVisGen) => {
+            let [idx, idy, idz] = chunk.get_id();
+            let adjacent_chunks = ADJACENT_OFFSETS.map(|[ox, oy, oz]| {
+              self.get_chunk_at(&[idx + ox, idy + oy, idz + oz]).map(|chunk| chunk.clone())
+            });
+            if !adjacent_chunks.iter().any(|chunk| { //Check if the chunk is adjacent to chunks that are still generating. If so then skip it.
+              chunk.as_ref().map_or(false, |chunk| {
+                chunk.get_stage() == ChunkStateStage::ChunkGen
+              })
+            }) { //Then send it to be processed.
+              self.send_task(ChunkTask {
+                chunk: chunk.clone(),
+                typ: ChunkTaskType::GenBlockVis(adjacent_chunks),
+              });
             }
-          }
-          chk
-        });
-
-        //TODO wait for .each to actually become usable.
-        let surrounding_chunk_refs = [ //it works
-          surrounding_chunk_locks[0].as_deref(),
-          surrounding_chunk_locks[1].as_deref(),
-          surrounding_chunk_locks[2].as_deref(),
-          surrounding_chunk_locks[3].as_deref(),
-          surrounding_chunk_locks[4].as_deref(),
-          surrounding_chunk_locks[5].as_deref(),
-        ];
-        {
-          let mut chunk_write_lock = chunk.write().unwrap();
-          chunk_write_lock.gen_block_vis(surrounding_chunk_refs);
-        }
+          },
+          Some(ChunkStateStage::MeshGen) => {
+            self.send_task(ChunkTask {
+              chunk: chunk.clone(),
+              typ: ChunkTaskType::GenVertices,
+            });
+          },
+          _ => {
+            //Do nothing for now.
+          },
+        };
       }
     }
   }
 
-  //Call chunk updates.
-  pub fn send_chunk_update(&self) {
-    for col in self.columns.iter() {
-      for chunk in col.chunks.iter() {
-        if chunk.read().unwrap().needs_updating() { //Only update the chunk if it needs it.
-          //println!("Sending chunk");
-          self.worker_pool_sender.send(chunk.clone()).unwrap();
-        }
-      }
+  fn send_task(&self, task: ChunkTask) {
+    if task.chunk.assign_if_waiting() {
+      self.worker_pool_sender.send(task).unwrap();
     }
   }
 
@@ -264,7 +256,7 @@ fn make_new_chunk(chunk_id: [i32; 3]) -> Arc<Chunk> {
 /// A column of chunks. Includes the heightmap for the chunk.
 struct ChunkColumn {
   pub chunks: Vec<Arc<Chunk>>,
-  pub height_map: SurfaceHeightmap
+  pub height_map: Arc<SurfaceHeightmap>
 }
 
 impl ChunkColumn {
@@ -281,7 +273,7 @@ impl ChunkColumn {
 
     Self {
       chunks: Vec::new(),
-      height_map
+      height_map: Arc::new(height_map)
     }
   }
 }

@@ -3,7 +3,7 @@ use std::{time::Instant, sync::mpsc::Sender};
 use cgmath::{Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
-use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkType};
+use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkTask};
 
 mod block;
 mod player;
@@ -24,7 +24,7 @@ pub struct World {
 
 
 impl World {
-  pub fn new(worker_pool_sender: Sender<ChunkType>) -> Self {
+  pub fn new(worker_pool_sender: Sender<ChunkTask>) -> Self {
     let player_pos = PlayerPosition {
         block_int: [1, 40, 1].into(),
         block_dec: [0.0; 3].into(),
@@ -32,8 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let mut terrain = ChunkedTerrain::new(player_pos, 4, worker_pool_sender);
-    terrain.gen_block_vis();
+    let terrain = ChunkedTerrain::new(player_pos, 16, worker_pool_sender);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
@@ -89,11 +88,10 @@ impl World {
 
     let accel = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED ;
     self.player.tick_position(&accel, &delta_secs);
-    let updated = self.terrain.update_player_position(&self.player.get_position());
-    if updated {
-      self.terrain.gen_block_vis();
-    }
-    self.terrain.send_chunk_update();
+    self.terrain.update_player_position(&self.player.get_position());
+    
+
+    self.terrain.tick_progress();
   }
 
 

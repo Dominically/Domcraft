@@ -1,20 +1,33 @@
-use std::sync::{mpsc::Receiver, Arc, RwLock, Mutex};
+use std::sync::{mpsc::Receiver, Arc, Mutex};
 
-use wgpu::{Queue, Device, BindGroupLayout};
+use noise::Perlin;
+use wgpu::{Queue, Device};
 
-use super::chunk::Chunk;
+use super::{chunk::Chunk, chunkedterrain::SurfaceHeightmap};
 
+pub enum ChunkTaskType {
+  GenTerrain(Arc<Perlin>, Arc<SurfaceHeightmap>),
+  GenBlockVis([Option<Arc<Chunk>>; 6]),
+  GenVertices
+}
 
-pub type ChunkType = Arc<RwLock<Chunk>>;
+pub struct ChunkTask {
+  pub chunk: Arc<Chunk>,
+  pub typ: ChunkTaskType
+}
 
-pub fn run_worker_pool(device: Arc<Device>, queue: Arc<Queue>, chunk_reciever: Arc<Mutex<Receiver<ChunkType>>>, thread_id: usize) {
+pub fn run_worker_pool(device: Arc<Device>, queue: Arc<Queue>, chunk_reciever: Arc<Mutex<Receiver<ChunkTask>>>, thread_id: usize) {
   'thread_loop: loop {
     let recieved = chunk_reciever.lock().unwrap().recv();
-    match recieved{
-        Ok(chunk) => {
-          chunk.read().unwrap().update_vertices(&device, &queue);
-        },
-        Err(_) => break 'thread_loop,
+    match recieved {
+      Ok(task) => {
+        match task.typ {
+            ChunkTaskType::GenTerrain(gen, surface_heightmap) => task.chunk.gen(&gen, &surface_heightmap),
+            ChunkTaskType::GenBlockVis(surrounding_chunks) => task.chunk.gen_block_vis(surrounding_chunks),
+            ChunkTaskType::GenVertices => task.chunk.update_vertices(&device, &queue),
+        }
+      },
+      Err(_) => break 'thread_loop,
     }
   }
 }

@@ -1,4 +1,4 @@
-use std::{sync::{Mutex, Arc, RwLock}, ops::Range, mem};
+use std::{sync::{Mutex, Arc, RwLock}, ops::Range};
 
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
@@ -8,6 +8,17 @@ use wgpu::{Device, Queue};
 use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
+
+pub const ADJACENT_OFFSETS: [[i32; 3]; 6] = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1]
+];
+
+const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE as i32;
 
 pub struct Chunk {
   chunk_id: [i32; 3],
@@ -23,7 +34,8 @@ struct ChunkState {
   progress: ChunkStateProgress
 }
 
-enum ChunkStateStage {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChunkStateStage {
   ChunkGen,
   ChunkVisGen,
   MeshGen,
@@ -48,12 +60,6 @@ pub struct ChunkMeshData {
   pub index_buffer: (Arc<wgpu::Buffer>, u64),
 }
 
-enum MeshUpdateState {
-  Outdated,
-  Updating,
-  Ready
-}
-
 impl Chunk {
   /// Generate a new chunk. 
   pub fn new(chunk_id: [i32; 3]) -> Self {
@@ -72,8 +78,8 @@ impl Chunk {
 
   ///Check if processing can start. Panics if something bad happens.
   fn start_process_check(&self, expected_stage: ChunkStateStage) -> bool {
-    let state = self.state.lock().unwrap();
-    if !matches!(state.stage, expected_stage) {
+    let mut state = self.state.lock().unwrap();
+    if state.stage != expected_stage {
       panic!("Function called at wrong stage!!!");
     }
     match state.progress {
@@ -96,9 +102,10 @@ impl Chunk {
   fn end_process_check<T>(&self, current_stage: ChunkStateStage, next_stage: ChunkStateStage, success: T)
     where T: FnOnce() 
   { //Cursed brackets
-    let state = self.state.lock().unwrap();
-    if !matches!(state.stage, current_stage) {
-      panic!("Chunk stage changed mid processing")
+    let mut state = self.state.lock().unwrap();
+    
+    if state.stage != current_stage {
+      panic!("Chunk stage changed mid processing: Expected: {:?}. Got: {:?}", current_stage, state.stage);
     }
     match state.progress {
       ChunkStateProgress::Processing => {
@@ -152,33 +159,32 @@ impl Chunk {
     }
 
     self.end_process_check(ChunkStateStage::ChunkGen, ChunkStateStage::ChunkVisGen, || {
-      mem::replace(&mut *self.blocks.write().unwrap(), Some(blocks));
+      *self.blocks.write().unwrap() = Some(blocks);
     });
   }
 
   /// Gets the block at the chunk-relative location. 
-  pub fn get_block_at(&self, x: isize, y: isize, z: isize) -> Option<Block> {
-    todo!();
+  pub fn get_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
+    self.blocks.read().unwrap().as_ref().and_then(|blocks| {
+      if CHUNK_RANGE_I32.contains(&x) && CHUNK_RANGE_I32.contains(&y) && CHUNK_RANGE_I32.contains(&z) {
+        Some(*blocks.get(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize).unwrap())
+      } else {
+        None
+      }
+    })
   }
 
   /// Gets the surrounding blocks, or none if they are out of bounds.
   pub fn get_surrounding_blocks_of(&self, x: i32, y: i32, z: i32) -> [Option<Block>; 6] {
-    let blocks = self.blocks.read().unwrap().as_ref();
+    let block_array_lock = self.blocks.read().unwrap();
+    let blocks = block_array_lock.as_ref();
     match blocks {
       Some(blocks) => {
-        [
-          [1, 0, 0],
-          [-1, 0, 0],
-          [0, 1, 0],
-          [0, -1, 0],
-          [0, 0, 1],
-          [0, 0, -1]
-        ].map(|[ox, oy, oz]| { //Map offsets.
-          let (xPos, yPos, zPos) = (ox + x, oy + y, oz + z);
-          const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE as i32;
+        ADJACENT_OFFSETS.map(|[ox, oy, oz]| { //Map offsets.
+          let (x_pos,y_pos,z_pos) = (ox + x, oy + y, oz + z);
 
-          if CHUNK_RANGE_I32.contains(&xPos) && CHUNK_RANGE_I32.contains(&yPos) && CHUNK_RANGE_I32.contains(&zPos) {
-            Some(*blocks.get(xPos as usize * CHUNK_SIZE * CHUNK_SIZE + yPos as usize * CHUNK_SIZE + zPos as usize).unwrap())
+          if CHUNK_RANGE_I32.contains(&x_pos) && CHUNK_RANGE_I32.contains(&y_pos) && CHUNK_RANGE_I32.contains(&z_pos) {
+            Some(*blocks.get(x_pos as usize * CHUNK_SIZE * CHUNK_SIZE + y_pos as usize * CHUNK_SIZE + z_pos as usize).unwrap())
           } else {
             None
           }
@@ -191,7 +197,7 @@ impl Chunk {
   }
 
   pub fn assign_if_waiting(&self) -> bool {
-    let state = self.state.lock().unwrap();
+    let mut state = self.state.lock().unwrap();
     match state.progress {
       ChunkStateProgress::Waiting => {
         state.progress = ChunkStateProgress::TaskAssigned;
@@ -202,12 +208,13 @@ impl Chunk {
   }
 
   ///Generates the visibility for blocks. The adjacent chunks correspond to BlockSide for their direction.
-  pub fn gen_block_vis(&self, adjacent_chunks: [Option<&Chunk>; 6]) {
+  pub fn gen_block_vis(&self, adjacent_chunks: [Option<Arc<Chunk>>; 6]) {
     if !self.start_process_check(ChunkStateStage::ChunkVisGen) {
       return;
     }
     
-    let blocks = self.blocks.read().unwrap().as_ref().unwrap();
+    let block_read_lock = self.blocks.read().unwrap();
+    let blocks = block_read_lock.as_ref().unwrap();
     let mut surface_visibility = Vec::<BlockSideVisibility>::with_capacity(blocks.len());
     for ((x, y, z), block_ref) in block_iterator().zip(blocks.iter()) {
       let block = *block_ref;
@@ -234,7 +241,9 @@ impl Chunk {
                 BlockSide::Front => [x, y, CHUNK_SIZE - 1],
               };
               
-              let block: Option<Block> = adjacent_chunks[index].and_then(|chunk| chunk.get_block_at(rel_pos[0] as isize, rel_pos[1] as isize, rel_pos[2] as isize));
+              let block: Option<Block> = adjacent_chunks.get(index).unwrap().as_ref().and_then(|chunk| 
+                chunk.get_block_at(rel_pos[0] as i32, rel_pos[1] as i32, rel_pos[2] as i32)
+              );
 
               let translucent = match block {
                 Some(block) => block.is_translucent(),
@@ -258,15 +267,15 @@ impl Chunk {
     if !self.start_process_check(ChunkStateStage::MeshGen) {
       return;
     }
-
-    let block_vis = self.block_vis.lock().unwrap().as_ref().expect("Please call gen_block_vis before generating vertices.");
+    let block_vis_lock = self.block_vis.lock().unwrap();
+    let block_vis = block_vis_lock.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let chunk_pos = self.chunk_id.map(|val| val * CHUNK_SIZE as i32);
     
     const WINDING_ORDER: [u32; 6] = [0, 1, 2, 2, 3, 0];
 
-    for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.read().unwrap().unwrap().iter().zip(block_vis)) {
+    for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.read().unwrap().as_ref().unwrap().iter().zip(block_vis)) {
       if block_visibility.is_invisible() {continue}; //Skip invisible blocks.
       let colour = block.get_colour();
 
@@ -296,7 +305,7 @@ impl Chunk {
       }
     }
     self.update_vertex_buffer(device, queue, vertices, indices);
-    self.end_process_check(ChunkStateStage::ChunkVisGen, ChunkStateStage::Ready, || {
+    self.end_process_check(ChunkStateStage::MeshGen, ChunkStateStage::Ready, || {
       //update vertex buffer here instead???
     });
 
@@ -332,6 +341,18 @@ impl Chunk {
 
   pub fn get_id(&self) -> [i32; 3] {
     self.chunk_id.clone()
+  }
+
+  pub fn get_pending_stage(&self) -> Option<ChunkStateStage> {
+    let state_lock = self.state.lock().unwrap();
+    match &state_lock.progress {
+      ChunkStateProgress::Waiting => Some(state_lock.stage.clone()),
+      _ => None
+    }
+  }
+
+  pub fn get_stage(&self) -> ChunkStateStage {
+    self.state.lock().unwrap().stage
   }
 }
 
