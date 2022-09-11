@@ -18,17 +18,18 @@ pub struct ChunkedTerrain {
   player_last_chunk_id: [i32; 3], //The last Chunk ID of the player.
   render_distance: u32,
   worker_pool_sender: Sender<ChunkTask>,
-  gen: Arc<Perlin>
+  gen: Arc<Perlin>,
+  chunk_gc: Sender<Arc<Chunk>>
 }
 
 impl ChunkedTerrain {
-  pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkTask>) -> Self {
+  pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
     let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE as i32);
     let chunk_id_bounds: [[i32; 3]; 2] = [
       player_chunk_id.map(|chk| chk-render_distance as i32).into(),
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
     ];
-
+    
     let gen = Arc::new(Perlin::new());
     
     let columns: Vec<ChunkColumn> = iproduct!(
@@ -49,7 +50,8 @@ impl ChunkedTerrain {
       worker_pool_sender,
       chunk_id_bounds,
       player_last_chunk_id: player_chunk_id.into(),
-      gen
+      gen,
+      chunk_gc
     }
   }
 
@@ -73,11 +75,16 @@ impl ChunkedTerrain {
       self.chunk_id_bounds[0][2]..self.chunk_id_bounds[1][2]
     ).zip(old_columns.into_iter());
     let mut next_old_column = old_column_iter.next(); //Store the next old column.
+    
+    
     for (ncx, ncz) in iproduct!(
       new_bounds[0][0]..new_bounds[1][0],
       new_bounds[0][2]..new_bounds[1][2]
     ) {
       while matches!(&next_old_column, Some(col) if matches!([col.0.0, col.0.1].cmp(&[ncx, ncz]), Ordering::Less)) { //Skip columns that have already passed.
+        for chunk in next_old_column.unwrap().1.chunks { //Send chunks to gc so deleting them doesn't block this thread.
+          self.chunk_gc.send(chunk).unwrap();
+        }
         next_old_column = old_column_iter.next();
       }
 
@@ -204,33 +211,39 @@ impl ChunkedTerrain {
     let new_end = new_bounds[1][1];
 
     let y_range_size = new_end - new_start;
-    
     let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<Chunk>>::with_capacity(y_range_size as usize));
+    
 
+    
     if new_start < old_end || new_end > old_start { //If there is an overlap.
       //Varaible names correspond to arrayshit.png
       let red = (new_start - old_start).max(0);
       let green = old_start.max(new_start);
       let blue = old_end.min(new_end);
 
-      let mut useful_old_chunks = old_chunk_list.into_iter().skip(red as usize);
+      let mut useful_old_chunks = old_chunk_list.into_iter();
+      for _ in 0..red {
+        let chunk = useful_old_chunks.next().unwrap();
+        self.chunk_gc.send(chunk).unwrap();
+      }
 
       for ncy in new_start..green {  
         let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
 
+
       for _ncy in green..blue {
         let reused_chunk = useful_old_chunks.next();
         match reused_chunk {
           Some(reused_chunk) => {
-            column.chunks.push(reused_chunk)
+            column.chunks.push(reused_chunk);
+            
           },
           None => {
             panic!("Reused chunk was none.")
           },
         }
-        
       }
 
       for ncy in blue..new_end {
@@ -238,10 +251,18 @@ impl ChunkedTerrain {
         column.chunks.push(new_chunk)
       }
 
+      useful_old_chunks.for_each(|remaining_chunk| { //Send remaining chunks to gc.
+        self.chunk_gc.send(remaining_chunk).unwrap();
+      });
+
     } else { //Completely new chunks.
       for ncy in new_start..new_end {
         let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
+      }
+
+      for chunk in old_chunk_list {
+        self.chunk_gc.send(chunk);
       }
     }
   }

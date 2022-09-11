@@ -1,7 +1,7 @@
-use std::{sync::{Mutex, Arc, mpsc::channel}, thread};
+use std::{sync::{Mutex, Arc, mpsc::{channel, Receiver}}, thread, time::{Instant, Duration}};
 
-use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState, VirtualKeyCode}};
-use world::chunk_worker_pool;
+use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState, VirtualKeyCode}, dpi::PhysicalPosition};
+use world::{chunk_worker_pool, chunk::Chunk};
 
 use crate::{renderer::Renderer, world::World};
 
@@ -22,9 +22,7 @@ async fn run() {
     .with_title("DomCraft [INDEV]").build(&event_loop).expect("Failed to create window!");
   let mut renderer = Renderer::new(&window).await.unwrap();
 
-
   let (worker_tx, worker_rx) = channel();
-
   let rx_arc = Arc::new(Mutex::new(worker_rx));
   let (device, queue) = renderer.get_device_queue();
   for i in 0..num_cpus::get() { //Spawn worker threads.
@@ -33,14 +31,25 @@ async fn run() {
       queue.clone(),
       rx_arc.clone()
     );
-    thread::spawn(move || {
+    thread::Builder::new().name(format!("Worker #{}", i)).spawn(move || {
       chunk_worker_pool::run_worker_pool(device, queue, rx_arc, i)
-    });
+    }).unwrap();
   }
 
-  let world = Arc::new(Mutex::new(World::new(worker_tx)));
+  //Spawn chunk GC thread.
+  let (gc_tx, gc_rx) = channel();
+  thread::Builder::new().name("GC Thread".to_string()).spawn(move || gc_thread(gc_rx)).unwrap();
+
+  let world = Arc::new(Mutex::new(World::new(worker_tx, gc_tx)));
 
   renderer.bind_world(world.clone());
+
+  {
+    let tick_world = world.clone();
+    thread::Builder::new().name("World Tick".to_string()).spawn(move || {
+      world_tick_thread(tick_world);
+    }).unwrap();
+  }
   println!("Done making world.");
   
   println!("Bound world");
@@ -50,9 +59,6 @@ async fn run() {
   let mut is_focused = true;
   window.focus_window();
   event_loop.run(move |evt, _, ctrl| {
-    let mut wrld = world.lock().unwrap();
-    wrld.tick();
-    drop(wrld);
 
     match evt {
       Event::WindowEvent { window_id, event } if window.id() == window_id => {
@@ -86,14 +92,17 @@ async fn run() {
         }
       }
       Event::RedrawRequested( window_id ) if window.id() == window_id => {
-        renderer.render().unwrap();
+        renderer.render().unwrap();        
       },
       Event::DeviceEvent { device_id: _, event } if is_focused => { //Raw input from val?
         match event {
           winit::event::DeviceEvent::MouseMotion { delta } => {
             let mut world = world.lock().unwrap();
             world.mouse_move(delta);
-            //let _ = window.set_cursor_position(LogicalPosition::new(0.5, 0.5));
+            let _ = window.set_cursor_position(PhysicalPosition::new(
+              window.inner_size().width/2,
+              window.inner_size().height/2
+            ));
           },
           _ => ()
         }
@@ -104,6 +113,27 @@ async fn run() {
       _ => (),
     }
   });
+}
 
+fn world_tick_thread(world: Arc<Mutex<World>>) {
+  const TICK_DELAY: f32 = 1.0/64.0;
+  let tick_duration = Duration::from_secs_f32(TICK_DELAY);
+  
+  loop {
+    let start_time = Instant::now();
+    world.lock().unwrap().tick();
+    let time_duration = Instant::now() - start_time;
+    if time_duration < tick_duration {
+      let diff = tick_duration - time_duration;
+      thread::sleep(diff);
+    }
+  }
+}
 
+fn gc_thread(rx: Receiver<Arc<Chunk>>) {
+  'gc: loop {
+    if rx.recv().is_err() {
+      break 'gc;
+    }
+  }
 }

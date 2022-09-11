@@ -71,8 +71,8 @@ impl<T: Pod> GenericBuffer<T> {
   }
 }
 
-impl<T: Pod> Drop for GenericBuffer<T> {
-    fn drop(&mut self) {
-        self.buf.destroy();
-    }
-}
+// impl<T: Pod> Drop for GenericBuffer<T> {
+//     fn drop(&mut self) {
+//         self.buf.destroy();
+//     }
+// }

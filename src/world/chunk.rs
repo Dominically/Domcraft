@@ -356,6 +356,20 @@ impl Chunk {
   }
 }
 
+// impl Drop for Chunk {
+//   fn drop(&mut self) {
+//     let current_thread = std::thread::current();
+//     let thread_name = current_thread.name();
+//     if let Some(name) = thread_name {
+//       if name != "GC Thread" {
+//         println!("Chunk dropped on thread: {}", name);
+//       }
+//     } else {
+//       println!("Chunk dropped on unnamed thread.");
+//     }
+//   }
+// }
+
 fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
   iproduct!(CHUNK_RANGE, CHUNK_RANGE, CHUNK_RANGE)
 }
