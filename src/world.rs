@@ -32,7 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let terrain = ChunkedTerrain::new(player_pos, 8, worker_pool_sender, chunk_gc);
+    let terrain = ChunkedTerrain::new(player_pos, 12, worker_pool_sender, chunk_gc);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 
@@ -60,7 +60,8 @@ impl World {
   }
 
   pub fn get_player_view(&self, aspect_ratio: f32) -> Matrix4<f32> {
-    self.player.get_view_matrix(aspect_ratio)
+    let delta_t = Instant::now() - self.last_tick;
+    self.player.get_view_matrix(aspect_ratio, delta_t)
   }
 
   pub fn get_player_pos(&self) -> PlayerPosition {

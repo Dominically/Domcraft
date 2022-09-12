@@ -262,7 +262,7 @@ impl ChunkedTerrain {
       }
 
       for chunk in old_chunk_list {
-        self.chunk_gc.send(chunk);
+        self.chunk_gc.send(chunk).unwrap();
       }
     }
   }

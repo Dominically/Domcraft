@@ -16,7 +16,7 @@ pub struct ChunkTask {
   pub typ: ChunkTaskType
 }
 
-pub fn run_worker_pool(device: Arc<Device>, queue: Arc<Queue>, chunk_reciever: Arc<Mutex<Receiver<ChunkTask>>>, thread_id: usize) {
+pub fn run_worker_pool(device: Arc<Device>, queue: Arc<Queue>, chunk_reciever: Arc<Mutex<Receiver<ChunkTask>>>) {
   'thread_loop: loop {
     let recieved = chunk_reciever.lock().unwrap().recv();
     match recieved {

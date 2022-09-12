@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, ops::{Add, AddAssign}, time::Duration};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, InnerSpace};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
 
 use crate::stolen::projection;
 
@@ -35,9 +35,10 @@ impl Player {
   }
 
   ///Gets the player view matrix relative to the nearest block. Conversions on integers still need to be done on the GPU.
-  pub fn get_view_matrix(&self, aspect_ratio: f32) -> Matrix4<f32> {
+  pub fn get_view_matrix(&self, aspect_ratio: f32, dt: Duration) -> Matrix4<f32> {
     let rotation = self.get_rotation_matrix();
-    let view = Matrix4::look_to_lh(self.position.block_dec, rotation.z, rotation.y);
+    let pos_offset = self.velocity * dt.as_secs_f32(); //To prevent stuttering and lagging on high Hz monitors.
+    let view = Matrix4::look_to_lh(self.position.block_dec + pos_offset, rotation.z, rotation.y);
     let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 400.0); //Very very far far plane.
 
     projection * view
