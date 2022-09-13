@@ -5,7 +5,7 @@ use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 use wgpu::{Device, Queue};
 
-use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
+use crate::{renderer::buffer::{GenericBuffer, GenericBufferType}};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
@@ -41,6 +41,7 @@ pub enum ChunkStateStage {
   MeshGen,
   Ready
 }
+
 
 enum ChunkStateProgress {
   Waiting,
@@ -103,7 +104,6 @@ impl Chunk {
     where T: FnOnce() 
   { //Cursed brackets
     let mut state = self.state.lock().unwrap();
-    
     if state.stage != current_stage {
       panic!("Chunk stage changed mid processing: Expected: {:?}. Got: {:?}", current_stage, state.stage);
     }
@@ -140,26 +140,28 @@ impl Chunk {
         chunk_pos[2] + z as i32
       ];
 
-      let noise_value = NoiseFn::<[f64; 3]>::get(gen, actual_pos.map(|val| val as f64 / 60.0));
-      let is_cave = noise_value > 0.5;
+      
 
-      let block = if self.chunk_id[0] == 0 && self.chunk_id[2] == 0 {
+      let block = if actual_pos[1] > surface_level {
         Block::Air
-      } else if is_cave {
-        Block::Air
-      } else if actual_pos[1] == surface_level { //Surface
-        Block::Grass
-      } else if actual_pos[1] < surface_level {
-        Block::Stone
       } else {
-        Block::Air
+        let noise_value = NoiseFn::<[f64; 3]>::get(gen, actual_pos.map(|val| val as f64 / 60.0));
+        let is_cave = noise_value > 0.5;
+        if is_cave {
+          Block::Air
+        } else if actual_pos[1] == surface_level {
+          Block::Grass
+        } else {
+          Block::Stone
+        }
       };
 
       blocks.push(block);
     }
 
+    *self.blocks.write().unwrap() = Some(blocks); //Should move inside success function but oh well.
     self.end_process_check(ChunkStateStage::ChunkGen, ChunkStateStage::ChunkVisGen, || {
-      *self.blocks.write().unwrap() = Some(blocks);
+      
     });
   }
 
@@ -198,7 +200,7 @@ impl Chunk {
 
   pub fn assign_if_waiting(&self) -> bool {
     let mut state = self.state.lock().unwrap();
-    match state.progress {
+    match &state.progress {
       ChunkStateProgress::Waiting => {
         state.progress = ChunkStateProgress::TaskAssigned;
         true
@@ -256,9 +258,9 @@ impl Chunk {
       }
       surface_visibility.push(vis);
     }
-
+    *self.block_vis.lock().unwrap() = Some(surface_visibility);
     self.end_process_check(ChunkStateStage::ChunkVisGen, ChunkStateStage::MeshGen, || {
-      *self.block_vis.lock().unwrap() = Some(surface_visibility);
+      
     });
   }
 
@@ -346,7 +348,9 @@ impl Chunk {
   pub fn get_pending_stage(&self) -> Option<ChunkStateStage> {
     let state_lock = self.state.lock().unwrap();
     match &state_lock.progress {
-      ChunkStateProgress::Waiting => Some(state_lock.stage.clone()),
+      ChunkStateProgress::Waiting => {
+        Some(state_lock.stage)
+      },
       _ => None
     }
   }

@@ -1,7 +1,7 @@
 use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use itertools::iproduct;
-use noise::{Perlin, NoiseFn};
+use noise::{Perlin, NoiseFn, Seedable};
 
 use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}};
 
@@ -30,7 +30,7 @@ impl ChunkedTerrain {
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
     ];
     
-    let gen = Arc::new(Perlin::new());
+    let gen = Arc::new(Perlin::new().set_seed(7355608));
     
     let columns: Vec<ChunkColumn> = iproduct!(
       chunk_id_bounds[0][0]..chunk_id_bounds[1][0], 
@@ -158,6 +158,7 @@ impl ChunkedTerrain {
     for col in self.columns.iter() {
       for chunk in col.chunks.iter() {
         let stage = chunk.get_pending_stage();
+        
         match stage {
           Some(ChunkStateStage::ChunkGen) => {
             self.send_task(ChunkTask {
