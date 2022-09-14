@@ -5,7 +5,7 @@ use noise::{Perlin, NoiseFn, Seedable};
 
 use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}};
 
-pub const CHUNK_SIZE: usize = 16;
+pub const CHUNK_SIZE: usize = 32;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
 pub const CHUNK_LENGTH: usize = HEIGHTMAP_SIZE*CHUNK_SIZE;
 pub const CHUNK_RANGE: Range<usize> = 0..CHUNK_SIZE;
@@ -67,6 +67,27 @@ impl ChunkedTerrain {
       player_chunk_id.map(|chk| chk+self.render_distance as i32).into()
     ];
 
+    let needs_regen = [ //Compare new bounds to old bounds to see if edges of chunks need regenerating.
+      (new_bounds[0][0] < self.chunk_id_bounds[0][0], new_bounds[1][0] > self.chunk_id_bounds[1][0]), //X expansion,
+      (new_bounds[0][1] < self.chunk_id_bounds[0][1], new_bounds[1][1] > self.chunk_id_bounds[1][1]), //Y expansion
+      (new_bounds[0][2] < self.chunk_id_bounds[0][2], new_bounds[1][2] > self.chunk_id_bounds[1][2]), //Z expansion
+    ];
+
+
+    let regen = [0, 1, 2].map(|i| {
+      let (a, b) = (needs_regen[i].0, needs_regen[i].1);
+      if a && b {
+        ChunkRegenCoord::Both(self.chunk_id_bounds[0][i], self.chunk_id_bounds[1][i] - 1)
+      } else if a { //Value is decreasing
+        ChunkRegenCoord::One(self.chunk_id_bounds[0][i])
+      } else if b { //Value is increasing
+        ChunkRegenCoord::One(self.chunk_id_bounds[1][i] - 1) //Chunk high bounds are exclusive so subtract 1.
+      } else {
+        ChunkRegenCoord::None
+      }
+    });
+    
+
     let new_columns = Vec::with_capacity(self.render_distance.pow(2) as usize * 2); //Estimate columns by squaring the render distance
     let old_columns = mem::replace(&mut self.columns, new_columns); //Replace the old column list with the new one.
 
@@ -93,7 +114,7 @@ impl ChunkedTerrain {
         Some(col) if [col.0.0, col.0.1] == [ncx, ncz] => {
           let mut column = next_old_column.unwrap().1;
           next_old_column = old_column_iter.next();
-          self.reuse_column(&mut column, new_bounds, [ncx, ncz]);
+          self.reuse_column(&mut column, new_bounds, [ncx, ncz], regen);
           column
         },
         //Create new column.
@@ -202,7 +223,7 @@ impl ChunkedTerrain {
     }
   }
 
-  fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2]) {
+  fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
 
     let [ncx, ncz] = column_pos;
     //Variable names for simplicity
@@ -213,8 +234,6 @@ impl ChunkedTerrain {
 
     let y_range_size = new_end - new_start;
     let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<Chunk>>::with_capacity(y_range_size as usize));
-    
-
     
     if new_start < old_end || new_end > old_start { //If there is an overlap.
       //Varaible names correspond to arrayshit.png
@@ -234,12 +253,21 @@ impl ChunkedTerrain {
       }
 
 
-      for _ncy in green..blue {
+      for ncy in green..blue {
         let reused_chunk = useful_old_chunks.next();
         match reused_chunk {
           Some(reused_chunk) => {
+            let needs_regen = [ncx, ncy, ncz].iter().zip(regen.iter()).any(|(val, regen_coord)| {
+              match regen_coord { //Check if the chunk needs regenerating.
+                ChunkRegenCoord::None => false,
+                ChunkRegenCoord::One(new_val) => val == new_val,
+                ChunkRegenCoord::Both(lo, hi) => val == lo || val == hi,
+              }
+            });
+            if needs_regen {
+              reused_chunk.mark_for_revis();
+            }
             column.chunks.push(reused_chunk);
-            
           },
           None => {
             panic!("Reused chunk was none.")
@@ -287,10 +315,17 @@ impl ChunkColumn {
     
     let mut height_map: SurfaceHeightmap = [0i32; HEIGHTMAP_SIZE];
     for ((x,z), hm) in iproduct!(CHUNK_RANGE, CHUNK_RANGE).zip(height_map.iter_mut()) {
-      *hm = (gen.get([
-        (noise_coords[0] + x as f64) / 30.0,
-        (noise_coords[1] + z as f64) / 30.0
-      ]) * 5.0 + 10.0) as i32;
+      let minor_hm = gen.get([
+        (noise_coords[0] + x as f64 + 18284.0) / 30.0,
+        (noise_coords[1] + z as f64 - 54761.0) / 30.0
+      ]) * 5.0 + 5.0;
+
+      let major_hm = gen.get([
+        (noise_coords[0] + x as f64 - 4892.0) / 300.0,
+        (noise_coords[1] + z as f64 + 645456.0) / 300.0
+      ]) * 50.0 + 50.0;
+
+      *hm = (major_hm + minor_hm + 5.0) as i32;
     }
 
     Self {
@@ -298,5 +333,12 @@ impl ChunkColumn {
       height_map: Arc::new(height_map)
     }
   }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ChunkRegenCoord {
+  None,
+  One(i32),
+  Both(i32, i32)
 }
  

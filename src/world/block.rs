@@ -13,7 +13,7 @@ pub enum Block {
 impl Block {
   pub fn is_translucent(&self) -> bool {
     match self {
-      Block::Air | Block::Grass => true,
+      Block::Air => true,
       _ => false
     }
   }
@@ -24,7 +24,7 @@ impl Block {
       Block::Grass => [0.3, 0.7, 0.3, 1.0],
       Block::Bedrock => [0.1, 0.1, 0.1, 1.0],
       Block::YellowStuff => [0.5, 0.5, 0.2, 1.0],
-      Block::Cloud => [0.6, 0.85, 1.0, 0.5],
+      Block::Cloud => [0.8, 0.8, 0.8, 0.5],
       _ => [1.0, 0.0, 1.0, 1.0], //MISSING COLOUR
     }
   }

@@ -32,7 +32,7 @@ impl World {
     
     let player = Player::new(player_pos.into());
     
-    let terrain = ChunkedTerrain::new(player_pos, 12, worker_pool_sender, chunk_gc);
+    let terrain = ChunkedTerrain::new(player_pos, 8, worker_pool_sender, chunk_gc);
     let last_tick = Instant::now();
     let mut controller = Controller::new();
 

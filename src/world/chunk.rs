@@ -34,7 +34,7 @@ struct ChunkState {
   progress: ChunkStateProgress
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
 pub enum ChunkStateStage {
   ChunkGen,
   ChunkVisGen,
@@ -142,8 +142,8 @@ impl Chunk {
 
       let ypos = actual_pos[1];
       let block = if ypos > surface_level {
-          const CLOUD_LEVEL: i32 = 80;
-          const CLOUD_DIST: i32 = 20;
+          const CLOUD_LEVEL: i32 = 120;
+          const CLOUD_DIST: i32 = 40;
           const CLOUD_STRENGTH: f64 = 0.3;
           if ypos >= CLOUD_LEVEL - CLOUD_DIST  && ypos <= CLOUD_LEVEL + CLOUD_DIST {
             let cloud_ypos_factor = (CLOUD_DIST - (ypos - CLOUD_LEVEL).abs()) as f64/CLOUD_DIST as f64;
@@ -218,6 +218,27 @@ impl Chunk {
         true
       },
       _ => false
+    }
+  }
+
+  ///Regen chunk visibility.
+  pub fn mark_for_revis(&self) {
+    let mut state_lock = self.unlock_state();
+    if state_lock.stage >= ChunkStateStage::ChunkVisGen {
+      match state_lock.progress {
+        ChunkStateProgress::Waiting => {
+          *state_lock = ChunkState {
+            stage: ChunkStateStage::ChunkVisGen,
+            progress: ChunkStateProgress::Waiting,
+          }
+        },
+        ChunkStateProgress::TaskAssigned | ChunkStateProgress::Processing=> {
+          state_lock.progress = ChunkStateProgress::SwitchingTo(ChunkStateStage::ChunkVisGen);
+        },
+        ChunkStateProgress::SwitchingTo(old_switch) => {
+          state_lock.progress = ChunkStateProgress::SwitchingTo(std::cmp::min(old_switch, ChunkStateStage::ChunkVisGen));
+        },
+      }
     }
   }
 
