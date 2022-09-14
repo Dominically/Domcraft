@@ -250,9 +250,11 @@ impl Renderer {
     let camera_view = CameraUniform {
       view: view_mat.into(),
       player_position: player_pos.block_int.into(),
+      padding_1: 0u32,
       sun_intensity: 1.0,
+      padding_2: 0u32,
       sun_normal: [-0.20265, 0.97566, 0.08378],
-      padding: 0u32
+      padding_3: [0u32; 3]
     };
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
 
@@ -321,9 +323,11 @@ trait Descriptable {
 pub struct CameraUniform {
   pub view: [[f32; 4]; 4],
   pub player_position: [i32; 3], //The player position per block.
+  pub padding_1: u32,
   pub sun_normal: [f32; 3],
+  pub padding_2: u32,
   pub sun_intensity: f32,
-  pub padding: u32 //Make the uniform buffer a size multiple of 8.
+  pub padding_3: [u32; 3]
 }
 
 impl Descriptable for ChunkVertex {
@@ -343,13 +347,13 @@ impl Descriptable for ChunkVertex {
             shader_location: 1
           },
           VertexAttribute { //Colour
-            format: VertexFormat::Float32x3,
+            format: VertexFormat::Float32x4,
             offset: size_of::<[i32; 3]>() as u64 + size_of::<[f32; 3]>() as u64,
             shader_location: 2
           },
           VertexAttribute { //Vertex normal
             format: VertexFormat::Float32x3,
-            offset: size_of::<[i32; 3]>() as u64 + size_of::<[f32; 3]>() as u64 * 2,
+            offset: size_of::<[i32; 3]>() as u64 + size_of::<[f32; 3]>() as u64 + size_of::<[f32; 4]>() as u64,
             shader_location: 3
           }
         ],

@@ -1,4 +1,4 @@
-use std::{sync::{Mutex, Arc, RwLock}, ops::Range};
+use std::{sync::{Mutex, Arc, RwLock, TryLockError, MutexGuard}, ops::Range};
 
 use bytemuck_derive::{Zeroable, Pod};
 use itertools::iproduct;
@@ -79,7 +79,7 @@ impl Chunk {
 
   ///Check if processing can start. Panics if something bad happens.
   fn start_process_check(&self, expected_stage: ChunkStateStage) -> bool {
-    let mut state = self.state.lock().unwrap();
+    let mut state = self.unlock_state();
     if state.stage != expected_stage {
       panic!("Function called at wrong stage!!!");
     }
@@ -103,7 +103,7 @@ impl Chunk {
   fn end_process_check<T>(&self, current_stage: ChunkStateStage, next_stage: ChunkStateStage, success: T)
     where T: FnOnce() 
   { //Cursed brackets
-    let mut state = self.state.lock().unwrap();
+    let mut state = self.unlock_state();
     if state.stage != current_stage {
       panic!("Chunk stage changed mid processing: Expected: {:?}. Got: {:?}", current_stage, state.stage);
     }
@@ -140,16 +140,28 @@ impl Chunk {
         chunk_pos[2] + z as i32
       ];
 
-      
-
-      let block = if actual_pos[1] > surface_level {
-        Block::Air
+      let ypos = actual_pos[1];
+      let block = if ypos > surface_level {
+          const CLOUD_LEVEL: i32 = 80;
+          const CLOUD_DIST: i32 = 20;
+          const CLOUD_STRENGTH: f64 = 0.3;
+          if ypos >= CLOUD_LEVEL - CLOUD_DIST  && ypos <= CLOUD_LEVEL + CLOUD_DIST {
+            let cloud_ypos_factor = (CLOUD_DIST - (ypos - CLOUD_LEVEL).abs()) as f64/CLOUD_DIST as f64;
+            let strength = (cloud_ypos_factor * CLOUD_STRENGTH) * 2.0 - 1.0;
+            if gen.get([actual_pos[0] as f64 / 50.0, actual_pos[1] as f64 / 10.0, actual_pos[2] as f64 / 50.0]) < strength {
+              Block::Cloud
+            } else {
+              Block::Air
+            }
+          } else {
+            Block::Air
+          }
       } else {
         let noise_value = NoiseFn::<[f64; 3]>::get(gen, actual_pos.map(|val| val as f64 / 60.0));
         let is_cave = noise_value > 0.5;
         if is_cave {
           Block::Air
-        } else if actual_pos[1] == surface_level {
+        } else if ypos == surface_level {
           Block::Grass
         } else {
           Block::Stone
@@ -199,7 +211,7 @@ impl Chunk {
   }
 
   pub fn assign_if_waiting(&self) -> bool {
-    let mut state = self.state.lock().unwrap();
+    let mut state = self.unlock_state();
     match &state.progress {
       ChunkStateProgress::Waiting => {
         state.progress = ChunkStateProgress::TaskAssigned;
@@ -346,7 +358,8 @@ impl Chunk {
   }
 
   pub fn get_pending_stage(&self) -> Option<ChunkStateStage> {
-    let state_lock = self.state.lock().unwrap();
+    let state_lock = self.unlock_state();
+
     match &state_lock.progress {
       ChunkStateProgress::Waiting => {
         Some(state_lock.stage)
@@ -356,7 +369,19 @@ impl Chunk {
   }
 
   pub fn get_stage(&self) -> ChunkStateStage {
-    self.state.lock().unwrap().stage
+    self.unlock_state().stage
+  }
+
+  fn unlock_state(&self) -> MutexGuard<ChunkState> {
+    loop {
+      match self.state.try_lock() {
+        Ok(lock) => {
+          return lock;
+        },
+        Err(TryLockError::Poisoned(_)) => panic!("Lock poisoned."),
+        Err(TryLockError::WouldBlock) => {}
+    }
+    }
   }
 }
 
@@ -383,6 +408,6 @@ fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
 pub struct ChunkVertex {
   absolute_position: [i32; 3],
   relative_position: [f32; 3],
-  colour: [f32; 3],
+  colour: [f32; 4],
   normal: [f32; 3]
 }
