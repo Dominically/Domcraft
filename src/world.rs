@@ -89,8 +89,9 @@ impl World {
 
     let accel = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED ;
     self.player.tick_position(&accel, &delta_secs);
-    self.terrain.update_player_position(&self.player.get_position());
 
+    
+    self.terrain.update_player_position(&self.player.get_position());
     self.terrain.tick_progress();
   }
 

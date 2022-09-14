@@ -25,7 +25,13 @@ async fn run() {
   let (worker_tx, worker_rx) = channel();
   let rx_arc = Arc::new(Mutex::new(worker_rx));
   let (device, queue) = renderer.get_device_queue();
-  for i in 0..num_cpus::get() { //Spawn worker threads.
+  let cpu_count = num_cpus::get();
+  let worker_thread_count = if cpu_count <= 2 {
+    1
+  } else {
+    cpu_count - 2
+  };
+  for i in 0..worker_thread_count { //Spawn worker threads.
     let (device, queue, rx_arc) = (
       device.clone(),
       queue.clone(),

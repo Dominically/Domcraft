@@ -242,9 +242,13 @@ impl Renderer {
         },
     };
 
-    let (view_mat, player_pos) = {
+    let (view_mat, player_pos, chunk_list) = {
       let world_lock = world.lock().unwrap();
-      (world_lock.get_player_view(self.size.width as f32/self.size.height as f32), world_lock.get_player_pos())
+      (
+        world_lock.get_player_view(self.size.width as f32/self.size.height as f32), 
+        world_lock.get_player_pos(),
+        world_lock.get_terrain().get_meshes()
+      )
     };
 
     let camera_view = CameraUniform {
@@ -264,8 +268,6 @@ impl Renderer {
     let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
       label: Some("very cool command encoder")
     });
-
-    let chunk_list = self.world.as_ref().unwrap().lock().unwrap().get_terrain().get_meshes(); //Get list of chunk meshes.
 
     { //Clear screen.
       //Filter out empty chunks.
