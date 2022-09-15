@@ -242,12 +242,13 @@ impl Renderer {
         },
     };
 
-    let (view_mat, player_pos, chunk_list) = {
+    let (view_mat, player_pos, chunk_list, light_data) = {
       let world_lock = world.lock().unwrap();
       (
         world_lock.get_player_view(self.size.width as f32/self.size.height as f32), 
         world_lock.get_player_pos(),
-        world_lock.get_terrain().get_meshes()
+        world_lock.get_terrain().get_meshes(),
+        world_lock.get_daylight_data()
       )
     };
 
@@ -255,10 +256,9 @@ impl Renderer {
       view: view_mat.into(),
       player_position: player_pos.block_int.into(),
       padding_1: 0u32,
-      sun_intensity: 1.0,
-      padding_2: 0u32,
-      sun_normal: [-0.20265, 0.97566, 0.08378],
-      padding_3: [0u32; 3]
+      sun_intensity: light_data.light_level,
+      sun_normal: light_data.sun_direction.into(),
+      padding_3: [0u32; 4]
     };
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
 
@@ -273,13 +273,14 @@ impl Renderer {
       //Filter out empty chunks.
       let chunk_datas = chunk_list.into_iter().filter_map(|(_, data)| if data.index_buffer.1 > 0 {Some(data)} else {None}).collect_vec();
 
+      let ll = light_data.light_level as f64;
       let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
         color_attachments: &[Some(RenderPassColorAttachment {
           ops: Operations {
             load: LoadOp::Clear(Color {
-              r: 0.3,
-              g: 0.3,
-              b: 0.7,
+              r: 0.3 * ll,
+              g: 0.3 * ll,
+              b: 0.7 * ll,
               a: 0.0
             }),
             store: true
@@ -327,9 +328,8 @@ pub struct CameraUniform {
   pub player_position: [i32; 3], //The player position per block.
   pub padding_1: u32,
   pub sun_normal: [f32; 3],
-  pub padding_2: u32,
   pub sun_intensity: f32,
-  pub padding_3: [u32; 3]
+  pub padding_3: [u32; 4]
 }
 
 impl Descriptable for ChunkVertex {

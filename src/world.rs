@@ -1,6 +1,6 @@
-use std::{time::Instant, sync::{mpsc::Sender, Arc}};
+use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI};
 
-use cgmath::{Matrix4, Rad, Vector3};
+use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp};
 use winit::event::VirtualKeyCode;
 
 use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkTask, chunk::Chunk};
@@ -15,11 +15,13 @@ pub mod chunk_worker_pool;
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.
 const NOCLIP_SPEED: f32 = 40.0; //blocks/sec
+
 pub struct World {
   terrain: ChunkedTerrain,
   player: Player,
   last_tick: Instant,
-  controller: Controller
+  controller: Controller,
+  uptime: Duration
 }
 
 
@@ -50,17 +52,20 @@ impl World {
       (VirtualKeyCode::RShift, Control::Up),
       (VirtualKeyCode::RControl, Control::Down)
     ]);
+
+    let uptime = Duration::new(0, 0);
     
     Self {
       terrain,
       player,
       last_tick,
-      controller
+      controller,
+      uptime
     }
   }
 
   pub fn get_player_view(&self, aspect_ratio: f32) -> Matrix4<f32> {
-    let delta_t = Instant::now() - self.last_tick;
+    let delta_t = self.since_last_tick();
     self.player.get_view_matrix(aspect_ratio, delta_t)
   }
 
@@ -73,9 +78,10 @@ impl World {
   }
 
   pub fn tick(&mut self) {
-    let now = Instant::now();
-    let delta_secs = now - self.last_tick;
-    self.last_tick = now;
+    let delta_secs = self.since_last_tick();
+    self.uptime += delta_secs;
+
+    self.last_tick = Instant::now();
 
     let x_speed = self.controller.get_action_value((Control::Left, -1.0), (Control::Right, 1.0), 0.0);
     let y_speed = self.controller.get_action_value((Control::Down, -1.0), (Control::Up, 1.0), 0.0);
@@ -95,7 +101,6 @@ impl World {
     self.terrain.tick_progress();
   }
 
-
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {
     self.controller.set_key(key, state);
   }
@@ -103,4 +108,31 @@ impl World {
   pub fn get_terrain(&self) -> &ChunkedTerrain {
     &self.terrain
   }
+
+  pub fn get_daylight_data(&self) -> WorldLightData {
+    const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds
+    const TILT: Deg<f32> = Deg(40.0); //20 degree tilt from horizon
+
+    let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
+    
+    let rotation =  Matrix3::from_angle_z(TILT) * Matrix3::from_angle_y(Rad(2.0 * PI) * cycle);
+
+    let sun_direction = rotation * Vector3 {x: 1.0, y: 0.0, z: 0.0};
+
+    let sun_angle = Rad(sun_direction.y.asin());
+
+    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.0, 1.0);
+
+    WorldLightData { sun_direction, light_level }
+  }
+
+  fn since_last_tick(&self) -> Duration {
+    let now = Instant::now();
+    now - self.last_tick
+  }
+}
+
+pub struct WorldLightData {
+  pub sun_direction: Vector3<f32>,
+  pub light_level: f32
 }

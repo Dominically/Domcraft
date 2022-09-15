@@ -35,7 +35,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4(camera_position, 1.0);
     let dot_product = dot(in.normal, camera.sun_normal);
-    let light_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) ;
+    let light_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) * camera.sun_intensity;
     let rgba = pow(in.colour.xyz * light_level, vec3<f32>(2.2, 2.2, 2.2));
     out.colour = vec4(rgba, in.colour.w);
     return out;
