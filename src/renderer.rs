@@ -36,7 +36,6 @@ use wgpu::{
   ColorWrites,
   BlendState,
   SurfaceConfiguration,
-  PresentMode,
   TextureUsages,
   RenderPassDescriptor,
   RenderPassColorAttachment,
@@ -60,7 +59,8 @@ use wgpu::{
   DepthBiasState,
   RenderPassDepthStencilAttachment,
   LoadOp,
-  IndexFormat
+  IndexFormat,
+  InstanceDescriptor
 };
 
 use winit::{window::Window, dpi::PhysicalSize};
@@ -84,8 +84,11 @@ pub struct Renderer {
 impl Renderer {
   
   pub async fn new(window: &Window) -> Result<Self, RendererCreateError> {
-    let instance = Instance::new(Backends::PRIMARY);
-    let surface = unsafe {instance.create_surface(window) };
+    let instance = Instance::new(InstanceDescriptor {
+        backends: Backends::PRIMARY,
+        ..Default::default() 
+    });
+    let surface = unsafe {instance.create_surface(window).unwrap() };
 
     let adapter = instance.request_adapter(&RequestAdapterOptions {
       power_preference: PowerPreference::HighPerformance,
@@ -103,12 +106,15 @@ impl Renderer {
     );
 
     let size = window.inner_size();
+    let surface_caps = surface.get_capabilities(&adapter);
     let surface_cfg = SurfaceConfiguration {
-      format: surface.get_supported_formats(&adapter)[0],
+      format: surface_caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap(),
       height: size.height,
       width: size.width,
-      present_mode: PresentMode::Fifo,
-      usage: TextureUsages::RENDER_ATTACHMENT
+      present_mode: surface_caps.present_modes[0],
+      usage: TextureUsages::RENDER_ATTACHMENT,
+      alpha_mode: surface_caps.alpha_modes[0],
+      view_formats: Vec::new(),
     };
     
     println!("Using {}", adapter.get_info().name);

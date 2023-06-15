@@ -121,7 +121,7 @@ impl World {
 
     let sun_angle = Rad(sun_direction.y.asin());
 
-    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.0, 1.0);
+    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.1, 1.0);
 
     WorldLightData { sun_direction, light_level }
   }
