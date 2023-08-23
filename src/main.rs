@@ -38,7 +38,7 @@ async fn run() {
       rx_arc.clone()
     );
     thread::Builder::new().name(format!("Worker #{}", i)).spawn(move || {
-      chunk_worker_pool::run_worker_pool(device, queue, rx_arc)
+      chunk_worker_pool::run_worker_thread(device, queue, rx_arc)
     }).unwrap();
   }
 

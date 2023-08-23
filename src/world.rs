@@ -113,7 +113,9 @@ impl World {
     const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds
     const TILT: Deg<f32> = Deg(40.0); //20 degree tilt from horizon
 
-    let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
+    let cycle = 0; //TEMP
+
+    // let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
     
     let rotation =  Matrix3::from_angle_z(TILT) * Matrix3::from_angle_y(Rad(2.0 * PI) * cycle);
 
