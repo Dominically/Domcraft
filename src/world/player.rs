@@ -24,7 +24,7 @@ pub struct Player {
 
 /// The PlayerPosition is a fixed point integer because it is useful to not use accuracy at large distances (unlike floats).
 #[repr(C)] //Repr(c) because this is being sent to GPU.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PlayerPosition {
   pub block_int: Point3<i32>, //The block integer.
   pub block_dec: Point3<f32> //The decimal part.
@@ -90,7 +90,32 @@ impl Add<Vector3<f32>> for PlayerPosition {
 impl AddAssign<Vector3<f32>> for PlayerPosition {
     fn add_assign(&mut self, rhs: Vector3<f32>) {
         let added_float = self.block_dec + rhs;
-        self.block_int = self.block_int.zip(added_float, |s, t| s + t.trunc() as i32); //Add integer components.
-        self.block_dec = added_float.map(|v| v.fract()); //Add decimal components.
+        self.block_int = self.block_int.zip(added_float, |s, t| s + t.trunc() as i32 + (if t<0.0 {-1} else {0})); //Add integer components.
+        self.block_dec = added_float.map(|v| if v<0.0 {v.fract()+1.0} else {v.fract()}); //Add decimal components.
     }
+}
+
+#[cfg(test)]
+mod test {
+    use cgmath::{Vector3, Point3, EuclideanSpace, InnerSpace};
+
+    use super::PlayerPosition;
+
+  #[test]
+  fn test_pos_add() {
+    let a = PlayerPosition {
+      block_dec: [0.0f32, 0.0, 0.0].into(),
+      block_int: [1i32, 1, 1].into()
+    };
+
+    let added = a + Vector3::from([1.5f32, 1.5, 1.5]);
+    
+    assert!((added.block_dec.to_vec() - Vector3{x:0.5f32,y:0.5,z:0.5}).magnitude() < 0.01);
+    assert_eq!(added.block_int, Point3{x:2i32,y:2,z:2});
+
+
+    let neg_add = a + Vector3::from([-0.5f32, -0.5, -0.5]);
+    assert!((neg_add.block_dec.to_vec() - Vector3{x:0.5,y:0.5,z:0.5}).magnitude() < 0.01);
+    assert_eq!(neg_add.block_int, Point3{x:0i32,y:0,z:0});
+  }
 }

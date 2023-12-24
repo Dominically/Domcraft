@@ -1,6 +1,6 @@
 use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI, ops::Div};
 
-use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp};
+use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp, EuclideanSpace};
 use winit::event::VirtualKeyCode;
 
 use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::{ChunkedTerrain, CHUNK_SIZE}, chunk_worker_pool::ChunkTask, chunk::Chunk, block::Block};
@@ -73,6 +73,7 @@ impl World {
     self.player.get_position()
   }
 
+
   pub fn mouse_move(&mut self, delta: (f64, f64)) {
     self.player.rotate_camera(MOUSE_SENS * delta.0 as f32, MOUSE_SENS * delta.1 as f32);
   }
@@ -99,6 +100,12 @@ impl World {
     
     self.terrain.update_player_position(&self.player.get_position());
     self.terrain.tick_progress();
+
+    //For testing purposes only.
+    let p_pos = self.get_player_pos();
+    let p = p_pos.block_int.to_vec();
+    let b = self.get_terrain().get_block_at(p);
+    println!("Player pos: {p:?}, Block: {b:?}");
   }
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {
@@ -131,27 +138,7 @@ impl World {
   fn since_last_tick(&self) -> Duration {
     let now = Instant::now();
     now - self.last_tick
-  }
-
-  /**
-   Returns the block at a given position, or None if the chunk is not available.
-   */
-  pub fn get_block_at(&self, pos: Vector3<i32>) -> Option<Block> {
-    let div = pos / (CHUNK_SIZE as i32);
-    let neg = pos.map(|v| if v < 0 {-1} else {0});
-    let chunk_id = div+neg;
-
-
-    let chunk = self.terrain.get_chunk_at(&chunk_id.into())?; //For some reason I've not used vector3s in my terrain data.
-
-
-    let inner_pos = pos - (chunk_id * (CHUNK_SIZE as i32));
-    let block = chunk.get_block_at(inner_pos.x, inner_pos.y, inner_pos.z).unwrap();
-
-    Some(block)
-  }
-
-  
+  }  
 }
 
 

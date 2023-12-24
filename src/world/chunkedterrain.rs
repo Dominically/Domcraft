@@ -1,9 +1,10 @@
 use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
+use cgmath::{Vector3, Point3};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 
-use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}};
+use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::Block};
 
 pub const CHUNK_SIZE: usize = 32;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -172,6 +173,22 @@ impl ChunkedTerrain {
     } else {
       None
     }
+  }
+
+  
+  pub fn get_block_at(&self, pos: Vector3<i32>) -> Option<Block> {
+    
+    let div = pos / (CHUNK_SIZE as i32);
+    let neg = pos.map(|v| if v < 0 {-1} else {0});
+    let chunk_id = div+neg;
+
+
+    let chunk = self.get_chunk_at(&chunk_id.into())?; //For some reason I've not used vector3s in my terrain data.
+
+    let inner_pos = pos - (chunk_id * (CHUNK_SIZE as i32));
+    let block = chunk.get_block_at(inner_pos.x, inner_pos.y, inner_pos.z)?;
+
+    Some(block)
   }
 
   //Call chunk updates.

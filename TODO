@@ -1,0 +1,1 @@
+Replace occurrences of [X; 3] with Vector3<X> including on GPU Repr(C) buffers because its easier and I can just cast them anyway.

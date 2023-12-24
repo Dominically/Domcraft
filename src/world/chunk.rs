@@ -177,8 +177,9 @@ impl Chunk {
     });
   }
 
-  /// Gets the block at the chunk-relative location. 
+  /// Gets the block at the chunk-relative location. This willr return None if the blocks have not yet been loaded.
   pub fn get_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
+
     self.blocks.read().unwrap().as_ref().and_then(|blocks| {
       if CHUNK_RANGE_I32.contains(&x) && CHUNK_RANGE_I32.contains(&y) && CHUNK_RANGE_I32.contains(&z) {
         Some(*blocks.get(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize).unwrap())
