@@ -5,7 +5,6 @@ use std::{fs::File, io::Read, borrow::Cow, sync::Arc, mem::size_of};
 
 use bytemuck_derive::{Pod, Zeroable};
 use itertools::Itertools;
-//these imports are not a joke wtf
 use wgpu::{
   Instance,
   Backends,
@@ -60,12 +59,12 @@ use wgpu::{
   RenderPassDepthStencilAttachment,
   LoadOp,
   IndexFormat,
-  InstanceDescriptor
+  InstanceDescriptor, StoreOp
 };
 
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::{texture::Texture, }};
+use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
 
 pub struct Renderer {
   surface: Surface,
@@ -289,7 +288,7 @@ impl Renderer {
               b: 0.7 * ll,
               a: 0.0
             }),
-            store: true
+            store: StoreOp::Store
           },
           resolve_target: None,
           view: &view
@@ -299,10 +298,12 @@ impl Renderer {
           view: &self.depth_texture.view,
           depth_ops: Some(Operations {
               load: LoadOp::Clear(1.0),
-              store: true,
+              store: StoreOp::Store,
           }),
           stencil_ops: None,
         }),
+        occlusion_query_set: None,
+        timestamp_writes: None
       });
       render_pass.set_bind_group(0, &self.camera_bind_group, &[]); //Set player and camera uniform./Chunk uniform group
       render_pass.set_pipeline(&self.pipeline);

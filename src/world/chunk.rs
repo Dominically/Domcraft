@@ -5,7 +5,7 @@ use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 use wgpu::{Device, Queue};
 
-use crate::{renderer::buffer::{GenericBuffer, GenericBufferType}};
+use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 

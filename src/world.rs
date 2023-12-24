@@ -1,9 +1,9 @@
-use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI};
+use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI, ops::Div};
 
 use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp};
 use winit::event::VirtualKeyCode;
 
-use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkTask, chunk::Chunk};
+use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::{ChunkedTerrain, CHUNK_SIZE}, chunk_worker_pool::ChunkTask, chunk::Chunk, block::Block};
 
 mod block;
 mod player;
@@ -110,10 +110,10 @@ impl World {
   }
 
   pub fn get_daylight_data(&self) -> WorldLightData {
-    const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds
+    const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds == 5 minutes
     const TILT: Deg<f32> = Deg(40.0); //20 degree tilt from horizon
 
-    let cycle = 0; //TEMP
+    let cycle = 0f32; //TEMP
 
     // let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
     
@@ -123,7 +123,7 @@ impl World {
 
     let sun_angle = Rad(sun_direction.y.asin());
 
-    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.1, 1.0);
+    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.5, 1.0);
 
     WorldLightData { sun_direction, light_level }
   }
@@ -132,7 +132,28 @@ impl World {
     let now = Instant::now();
     now - self.last_tick
   }
+
+  /**
+   Returns the block at a given position, or None if the chunk is not available.
+   */
+  pub fn get_block_at(&self, pos: Vector3<i32>) -> Option<Block> {
+    let div = pos / (CHUNK_SIZE as i32);
+    let neg = pos.map(|v| if v < 0 {-1} else {0});
+    let chunk_id = div+neg;
+
+
+    let chunk = self.terrain.get_chunk_at(&chunk_id.into())?; //For some reason I've not used vector3s in my terrain data.
+
+
+    let inner_pos = pos - (chunk_id * (CHUNK_SIZE as i32));
+    let block = chunk.get_block_at(inner_pos.x, inner_pos.y, inner_pos.z).unwrap();
+
+    Some(block)
+  }
+
+  
 }
+
 
 pub struct WorldLightData {
   pub sun_direction: Vector3<f32>,

@@ -1,18 +1,25 @@
 use std::{f32::consts::PI, ops::{Add, AddAssign}, time::Duration};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, Vector2};
 
 use crate::stolen::projection;
 
 const SPEED_FACTOR: f32 = 0.5;
 const DEFAULT_FOV: f32 = 75.0;
 
+const HITBOX: Vector3<Vector2<f32>> = Vector3 {
+  x: Vector2 {x: -0.5, y: 0.5},
+  y: Vector2 {x: -1.5, y: 0.5}, //y is the vertical axis i believe
+  z: Vector2 {x: -0.5, y: 0.5}
+};
+
 pub struct Player {
   position: PlayerPosition,
   velocity: Vector3<f32>,
   yaw: Rad<f32>,
   pitch: Rad<f32>,
-  pub fov: f32
+  pub fov: f32,
+  hitbox: Vector3<Vector2<f32>> //Info for player bounding box.
 }
 
 /// The PlayerPosition is a fixed point integer because it is useful to not use accuracy at large distances (unlike floats).
@@ -30,7 +37,8 @@ impl Player {
       velocity: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
       yaw: Rad(0.0),
       pitch: Rad(0.0),
-      fov: DEFAULT_FOV
+      fov: DEFAULT_FOV,
+      hitbox: HITBOX
     }
   }
 
