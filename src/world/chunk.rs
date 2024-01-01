@@ -23,7 +23,7 @@ const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE as i32;
 pub struct Chunk {
   chunk_id: [i32; 3],
   blocks: RwLock<Option<Vec<Block>>>,
-  block_vis: Mutex<Option<Vec<BlockSideVisibility>>>,
+  block_vis: RwLock<Option<Vec<BlockSideVisibility>>>,
   mesh: Mutex<Option<ChunkMesh>>,
   state: Mutex<ChunkState>
 }
@@ -68,7 +68,7 @@ impl Chunk {
     Self {
       chunk_id,
       blocks: RwLock::new(None),
-      block_vis: Mutex::new(None),
+      block_vis: RwLock::new(None),
       mesh: Mutex::new(None),
       state: Mutex::new(ChunkState {
         stage: ChunkStateStage::ChunkGen,
@@ -177,15 +177,29 @@ impl Chunk {
     });
   }
 
+  /// Convert a chunk-relative coordinate to its index in arrays. 
+  pub(super) fn rel_pos_to_index(x: i32, y: i32, z: i32) -> Option<usize> {
+    if CHUNK_RANGE_I32.contains(&x) && CHUNK_RANGE_I32.contains(&y) && CHUNK_RANGE_I32.contains(&z) {
+      Some(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize)
+    } else {
+      None
+    }
+  }
+
+  //TODO optimise get_block_at into a separate struct for multiple accesses (means RwLock doesn't need many reads).
+
   /// Gets the block at the chunk-relative location. This willr return None if the blocks have not yet been loaded.
   pub fn get_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
-
     self.blocks.read().unwrap().as_ref().and_then(|blocks| {
-      if CHUNK_RANGE_I32.contains(&x) && CHUNK_RANGE_I32.contains(&y) && CHUNK_RANGE_I32.contains(&z) {
-        Some(*blocks.get(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize).unwrap())
-      } else {
-        None
-      }
+      let index = Self::rel_pos_to_index(x, y, z)?;
+      Some(*blocks.get(index).unwrap())
+    })
+  }
+
+  pub fn get_vis_at(&self, x: i32, y: i32, z: i32) -> Option<BlockSideVisibility> {
+    self.block_vis.read().unwrap().as_ref().and_then(|bv| {
+      let index = Self::rel_pos_to_index(x, y, z)?;
+      Some(*bv.get(index).unwrap())
     })
   }
 
@@ -292,7 +306,7 @@ impl Chunk {
       }
       surface_visibility.push(vis);
     }
-    *self.block_vis.lock().unwrap() = Some(surface_visibility);
+    *self.block_vis.write().unwrap() = Some(surface_visibility);
     self.end_process_check(ChunkStateStage::ChunkVisGen, ChunkStateStage::MeshGen, || {
       
     });
@@ -303,7 +317,7 @@ impl Chunk {
     if !self.start_process_check(ChunkStateStage::MeshGen) {
       return;
     }
-    let block_vis_lock = self.block_vis.lock().unwrap();
+    let block_vis_lock = self.block_vis.read().unwrap();
     let block_vis = block_vis_lock.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -394,6 +408,7 @@ impl Chunk {
     self.unlock_state().stage
   }
 
+  //Spinloop chunk unlock.
   fn unlock_state(&self) -> MutexGuard<ChunkState> {
     loop {
       match self.state.try_lock() {

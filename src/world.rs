@@ -95,7 +95,7 @@ impl World {
     };
 
     let accel = self.player.get_rotation_matrix() * direction_vector * NOCLIP_SPEED ;
-    self.player.tick_position(&accel, &delta_secs);
+    self.player.tick_position(&accel, &delta_secs, &self.terrain);
 
     
     self.terrain.update_player_position(&self.player.get_position());
@@ -105,7 +105,6 @@ impl World {
     let p_pos = self.get_player_pos();
     let p = p_pos.block_int.to_vec();
     let b = self.get_terrain().get_block_at(p);
-    println!("Player pos: {p:?}, Block: {b:?}");
   }
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {

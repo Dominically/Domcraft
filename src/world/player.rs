@@ -4,14 +4,20 @@ use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, Vec
 
 use crate::stolen::projection;
 
+use super::chunkedterrain::ChunkedTerrain;
+
 const SPEED_FACTOR: f32 = 0.5;
 const DEFAULT_FOV: f32 = 75.0;
 
-const HITBOX: Vector3<Vector2<f32>> = Vector3 {
-  x: Vector2 {x: -0.5, y: 0.5},
-  y: Vector2 {x: -1.5, y: 0.5}, //y is the vertical axis i believe
-  z: Vector2 {x: -0.5, y: 0.5}
+const DEFAULT_HITBOX: HitBox = HitBox {
+  // x: Vector2 {x: -0.5, y: 0.5},
+  // y: Vector2 {x: -1.5, y: 0.5}, //y is up
+  // z: Vector2 {x: -0.5, y: 0.5}
+  a: Vector3 {x: -0.5, y:0.5, z: -0.5},
+  b: Vector3 {x: 0.5, y: 0.5, z: 0.5}
 };
+
+//TODO possibly split hitbox and position data into a separate entity data structure.
 
 pub struct Player {
   position: PlayerPosition,
@@ -19,7 +25,15 @@ pub struct Player {
   yaw: Rad<f32>,
   pitch: Rad<f32>,
   pub fov: f32,
-  hitbox: Vector3<Vector2<f32>> //Info for player bounding box.
+  hitbox: HitBox
+}
+
+/**
+ The hitbox is a 3-dimensional cuboid aligned with the world that cannot rotate. It contains 
+ */
+pub struct HitBox {
+  pub a: Vector3<f32>,
+  pub b: Vector3<f32>
 }
 
 /// The PlayerPosition is a fixed point integer because it is useful to not use accuracy at large distances (unlike floats).
@@ -38,7 +52,7 @@ impl Player {
       yaw: Rad(0.0),
       pitch: Rad(0.0),
       fov: DEFAULT_FOV,
-      hitbox: HITBOX
+      hitbox: DEFAULT_HITBOX
     }
   }
 
@@ -68,7 +82,13 @@ impl Player {
     self.position.clone()
   }
 
-  pub fn tick_position(&mut self, target_vel: &Vector3<f32>, dt: &Duration) {
+  /**
+  Update player position in world.
+   - `target_vel` - Target velocity.
+   - `dt` - Duration since last tick.
+   - `terrain` - World terrain data. 
+   */
+  pub fn tick_position(&mut self, target_vel: &Vector3<f32>, dt: &Duration, terrain: &ChunkedTerrain) {
     let diff = target_vel - self.velocity;
     let secs = dt.as_secs_f32();
     let factor = secs/(secs + SPEED_FACTOR);

@@ -12,7 +12,7 @@ mod stolen;
 pub type ArcWorld = Arc<Mutex<World>>;
 
 fn main() {
-  println!("Hello, world!2");
+  println!("Starting Domcraft...");
   pollster::block_on(run());
 }
 
@@ -56,9 +56,6 @@ async fn run() {
       world_tick_thread(tick_world);
     }).unwrap();
   }
-  println!("Done making world.");
-  
-  println!("Bound world");
 
   window.set_cursor_visible(false);
 

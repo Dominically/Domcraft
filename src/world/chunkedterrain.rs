@@ -4,7 +4,7 @@ use cgmath::{Vector3, Point3};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 
-use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::PlayerPosition, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::Block};
+use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::Block};
 
 pub const CHUNK_SIZE: usize = 32;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -240,8 +240,52 @@ impl ChunkedTerrain {
     }
   }
 
-  fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
 
+  /**
+    Tests the hitbox from its faces. Blocks that are completely inside the hitbox will not be checked.
+    
+    NOTE: This is (currently) not meant to be called at high frequency (many times per tick)
+    and will require optimisation if this is necessary.
+    This will also prevent the player from entering chunks that are not yet generated.
+
+   */
+  pub fn test_hitbox_collision(&self, old_pos: PlayerPosition, new_pos: PlayerPosition, hitbox: &HitBox) -> [bool; 6] {
+    //Calculate absolute block positions of hitbox.
+    let ba = (old_pos + hitbox.a).block_int;
+    let bb = (old_pos + hitbox.b).block_int;
+    
+    //Each one of these faces touches point `ba` or `bb`.
+    //The order of these surfaces correspondes to BlockSide in block.rs.
+
+    
+    
+    todo!()
+    //This code is commented out because I don't think it's gonna work.
+
+    // let test_surfaces = [
+    //   [ba, Point3::from([bb.x, bb.y, ba.z])],
+    //   [ba, Point3::from([bb.x, ba.y, bb.z])],
+    //   [ba, Point3::from([ba.x, bb.y, bb.z])],
+    //   [bb, Point3::from([ba.x, ba.y, bb.z])],
+    //   [bb, Point3::from([ba.x, bb.y, ba.z])],
+    //   [bb, Point3::from([bb.x, ba.y, ba.z])]
+    // ];
+
+    // test_surfaces.map(|[p, q]| { //Test from point p to point q and find collisions.
+    //   let flagged = false;
+    //   for (x, y, z) in iproduct!(p.x..q.x, p.y..q.y, p.z..q.z) {
+    //     let block = self.get_block_at(x, y, z);
+    //     match block {
+    //       Some(Block::Air) => {}, //Do nothign
+    //       _ =>
+    //     }
+    //   }
+      
+    //   flagged //Return whether surface has collision.
+    // })
+  }
+
+  fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
     let [ncx, ncz] = column_pos;
     //Variable names for simplicity
     let old_start = self.chunk_id_bounds[0][1];

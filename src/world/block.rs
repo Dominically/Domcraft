@@ -82,7 +82,7 @@ impl TryFrom<u8> for BlockSide {
 }
 
 /// This is so I can cull faces that can't be seen.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct BlockSideVisibility {
   flags: u8 //Uses bit setting because i dont want to run out of ram again.
 }

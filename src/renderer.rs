@@ -79,7 +79,7 @@ pub struct Renderer {
   world: Option<ArcWorld>
 }
 
-
+//Modified from https://sotrh.github.io/learn-wgpu/
 impl Renderer {
   
   pub async fn new(window: &Window) -> Result<Self, RendererCreateError> {
@@ -116,8 +116,7 @@ impl Renderer {
       view_formats: Vec::new(),
     };
     
-    println!("Using {}", adapter.get_info().name);
-    
+    println!("Using {} for rendering.", adapter.get_info().name);
 
     let mut shader_file = File::open("./shaders/shader.wgsl").map_err(|_| RendererCreateError::ShaderLoadError)?;
     let mut shader: String = String::new();
