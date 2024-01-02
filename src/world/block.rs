@@ -17,6 +17,14 @@ impl Block {
       _ => false
     }
   }
+  
+  ///Determines whether a player can pass through this block.
+  pub fn is_solid(&self) -> bool {
+    match self {
+      Block::Air | Block::Cloud => true,
+      _ => false
+    }
+  }
 
   pub fn get_colour(&self) -> [f32; 4] {
     match self {
@@ -55,12 +63,12 @@ impl BlockSide {
 
   pub fn get_face_normal(&self) -> [f32; 3] {
     match self {
-        BlockSide::Right => [1.0, 0.0, 0.0],
-        BlockSide::Left => [-1.0, 0.0, 0.0],
-        BlockSide::Above => [0.0, 1.0, 0.0],
-        BlockSide::Below => [0.0, -1.0, 0.0],
-        BlockSide::Back => [0.0, 0.0, 1.0],
-        BlockSide::Front => [0.0, 0.0, -1.0],
+        BlockSide::Right => [1.0, 0.0, 0.0], //Pos X.
+        BlockSide::Left => [-1.0, 0.0, 0.0], //Neg X.
+        BlockSide::Above => [0.0, 1.0, 0.0], //Pos Y.
+        BlockSide::Below => [0.0, -1.0, 0.0], //Neg Y.
+        BlockSide::Back => [0.0, 0.0, 1.0], //Pos Z.
+        BlockSide::Front => [0.0, 0.0, -1.0], //Neg Z.
     }
   }
 }

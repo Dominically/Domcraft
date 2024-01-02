@@ -4,7 +4,7 @@ use cgmath::{Vector3, Point3};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 
-use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::Block};
+use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::{Block, BlockSide}};
 
 pub const CHUNK_SIZE: usize = 32;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
@@ -249,18 +249,38 @@ impl ChunkedTerrain {
     This will also prevent the player from entering chunks that are not yet generated.
 
    */
-  pub fn test_hitbox_collision(&self, old_pos: PlayerPosition, new_pos: PlayerPosition, hitbox: &HitBox) -> [bool; 6] {
-    //Calculate absolute block positions of hitbox.
-    let ba = (old_pos + hitbox.a).block_int;
-    let bb = (old_pos + hitbox.b).block_int;
+  pub fn get_collision_info(&self, old_pos: PlayerPosition, delta: Vector3<f32>, hitbox: &HitBox) -> PlayerPosition {
+    let target_pos = old_pos + delta; //The position if there is no collision.
     
-    //Each one of these faces touches point `ba` or `bb`.
-    //The order of these surfaces correspondes to BlockSide in block.rs.
+    //Calculate corners of hitbox data.
+    let a1 = old_pos + hitbox.a;
+    let b1 = old_pos + hitbox.b;
+    let a2 = target_pos + hitbox.a;
+    let b2 = target_pos + hitbox.b;
+
+    //Calculate min and max of positions.
+    let points = [a1, b1, a2, b2].into_iter().fold((a1.block_int, b1.block_int), |(mut min, mut max), i| { //Start with default positions.
+      
+    });
+
+    //Convert into direction info so we know which sides to test.
+    let is_right = delta.x >= 0.0;
+    let is_up = delta.y >= 0.0;
+    let is_forward = delta.z >= 0.0;
+
+
+    
+    // println!("Right: {is_right}, Up: {is_up}, Forward: {is_forward}");
 
     
     
-    todo!()
+    
+    return target_pos; //TODO temp for now.
     //This code is commented out because I don't think it's gonna work.
+
+    // //Calculate absolute block positions of hitbox.
+    // let ba = (old_pos + hitbox.a).block_int;
+    // let bb = (old_pos + hitbox.b).block_int;
 
     // let test_surfaces = [
     //   [ba, Point3::from([bb.x, bb.y, ba.z])],
