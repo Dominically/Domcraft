@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, ops::{Add, AddAssign}, time::Duration};
+use std::{f32::consts::PI, ops::{Add, AddAssign, SubAssign, Sub}, time::Duration};
 
 use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, Vector2};
 
@@ -13,8 +13,8 @@ const DEFAULT_HITBOX: HitBox = HitBox {
   // x: Vector2 {x: -0.5, y: 0.5},
   // y: Vector2 {x: -1.5, y: 0.5}, //y is up
   // z: Vector2 {x: -0.5, y: 0.5}
-  a: Vector3 {x: -0.5, y:0.5, z: -0.5},
-  b: Vector3 {x: 0.5, y: 0.5, z: 0.5}
+  lo: Vector3 {x: -0.5, y:-1.5, z: -0.5},
+  hi: Vector3 {x: 0.5, y: 0.5, z: 0.5}
 };
 
 //TODO possibly split hitbox and position data into a separate entity data structure.
@@ -29,11 +29,11 @@ pub struct Player {
 }
 
 /**
- The hitbox is a 3-dimensional cuboid aligned with the world that cannot rotate. It contains 
+ The hitbox is a 3-dimensional cuboid aligned with the world that cannot rotate. It is relevant for player physics.
  */
 pub struct HitBox {
-  pub a: Vector3<f32>,
-  pub b: Vector3<f32>
+  pub lo: Vector3<f32>,
+  pub hi: Vector3<f32>
 }
 
 /// The PlayerPosition is a fixed point integer because it is useful to not use accuracy at large distances (unlike floats).
@@ -100,6 +100,15 @@ impl Player {
   }
 }
 
+impl AddAssign<Vector3<f32>> for PlayerPosition {
+  fn add_assign(&mut self, rhs: Vector3<f32>) {
+      let added_float = self.block_dec + rhs;
+      self.block_int = self.block_int.zip(added_float, |s, t| s + t.trunc() as i32 + (if t<0.0 {-1} else {0})); //Add integer components.
+      self.block_dec = added_float.map(|v| if v<0.0 {v.fract()+1.0} else {v.fract()}); //Add decimal components.
+  }
+}
+
+//TODO cleanup messy boilerplate code.
 impl Add<Vector3<f32>> for PlayerPosition {
     type Output = PlayerPosition;
 
@@ -109,12 +118,47 @@ impl Add<Vector3<f32>> for PlayerPosition {
     }
 }
 
-impl AddAssign<Vector3<f32>> for PlayerPosition {
-    fn add_assign(&mut self, rhs: Vector3<f32>) {
-        let added_float = self.block_dec + rhs;
-        self.block_int = self.block_int.zip(added_float, |s, t| s + t.trunc() as i32 + (if t<0.0 {-1} else {0})); //Add integer components.
-        self.block_dec = added_float.map(|v| if v<0.0 {v.fract()+1.0} else {v.fract()}); //Add decimal components.
-    }
+impl SubAssign<Vector3<f32>> for PlayerPosition {
+  fn sub_assign(&mut self, rhs: Vector3<f32>) {
+      *self += -rhs;
+  }
+}
+
+impl Sub<Vector3<f32>> for PlayerPosition {
+  type Output = PlayerPosition;
+
+  fn sub(self, rhs: Vector3<f32>) -> Self::Output {
+      self + -rhs
+  }
+}
+
+impl AddAssign<Vector3<i32>> for PlayerPosition {
+  fn add_assign(&mut self, rhs: Vector3<i32>) {
+    self.block_int += rhs;
+  }
+}
+
+impl Add<Vector3<i32>> for PlayerPosition {
+  type Output = PlayerPosition;
+
+  fn add(mut self, rhs: Vector3<i32>) -> Self::Output {
+    self += rhs; //Use AddAssign trait again.
+    self
+  }
+}
+
+impl SubAssign<Vector3<i32>> for PlayerPosition {
+  fn sub_assign(&mut self, rhs: Vector3<i32>) {
+      *self += -rhs;
+  }
+}
+
+impl Sub<Vector3<i32>> for PlayerPosition {
+  type Output = PlayerPosition;
+
+  fn sub(self, rhs: Vector3<i32>) -> Self::Output {
+      self + -rhs
+  }
 }
 
 #[cfg(test)]

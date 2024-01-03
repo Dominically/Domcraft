@@ -1,6 +1,6 @@
 use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
-use cgmath::{Vector3, Point3};
+use cgmath::{Vector3, Point3, Bounded, EuclideanSpace};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 
@@ -252,25 +252,63 @@ impl ChunkedTerrain {
   pub fn get_collision_info(&self, old_pos: PlayerPosition, delta: Vector3<f32>, hitbox: &HitBox) -> PlayerPosition {
     let target_pos = old_pos + delta; //The position if there is no collision.
     
-    //Calculate corners of hitbox data.
-    let a1 = old_pos + hitbox.a;
-    let b1 = old_pos + hitbox.b;
-    let a2 = target_pos + hitbox.a;
-    let b2 = target_pos + hitbox.b;
+    let hitbox_size = hitbox.hi - hitbox.lo;
 
-    //Calculate min and max of positions.
-    let points = [a1, b1, a2, b2].into_iter().fold((a1.block_int, b1.block_int), |(mut min, mut max), i| { //Start with default positions.
-      
-    });
+    //Calculate the absolute positions of the hitbox corners.
+    let a1 = old_pos + hitbox.lo;
+    let b1 = old_pos + hitbox.hi;
+    let a2 = target_pos + hitbox.lo;
+    let b2 = target_pos + hitbox.hi;
 
-    //Convert into direction info so we know which sides to test.
-    let is_right = delta.x >= 0.0;
-    let is_up = delta.y >= 0.0;
-    let is_forward = delta.z >= 0.0;
+    //Work out bounds of hitbox check. This is so we can work in relative coordinates to preserve floating-point accuracy.
+    let (min, max) = [a1, b1, a2, b2].into_iter().fold((a1.block_int, b1.block_int), |(min, max), pos| ( //Start with default positions.
+      min.zip(pos.block_int, |p, q| p.min(q)),
+      max.zip(pos.block_int, |p, q| p.max(q))
+    ));
 
+    let (min, max) = (min.to_vec(), max.to_vec()); //Cast min and max to vectors. This should be a zero cost type cast.
 
+    //Calculate player positions relative to the lesser corner of the hitbox check area.
+    let rel_old_pos = old_pos - min;
+    let rel_new_pos = target_pos - min;
+
+    //TODO remove this because it's for debugging purposes only
+    println!("Min Pos: {min:?}, Max Pos: {max:?}");
     
-    // println!("Right: {is_right}, Up: {is_up}, Forward: {is_forward}");
+    //Contains info about hitbox faces. `false` = select from lesser corner, `true` = select from greater corner.
+    // const FACE_VERT_INFO: [[[bool; 3]; 2]; 6] = [
+    //   [[true, true, true], [true, false, false]], //Right facing side (Pos X).
+    //   [[false, true, true], [false, false, false]], //Left facing side (Neg X).
+    //   [[true, true, true], [false, true, false]], //Upward facing side (Pos Y).
+    //   [[true, false, true], [false, false, false]], //Downward facing side (Neg Y).
+    //   [[true, true, true], [false, false, true]], //Backward facing side (Pos Z).
+    //   [[true, true, false], [false, false, false]] //Forward facing side (Neg Z).
+    // ];
+
+    let sides_to_test = [ //Determine the faces which we need to test collision for (the direction the player is heading in).
+      if delta.x >= 0.0 {0usize} else {1},
+      if delta.y >= 0.0 {2} else {3},
+      if delta.z >= 0.0 {4} else {5}
+    ];
+
+    for side in sides_to_test { //Now test sides for collision.
+      let is_positive_dir = side%2==0; //true = hi, false = lo
+      let dir_dim = side/3; //0 = x, 1 = y, 2 = z
+
+      let (a_old, a_new) = if is_positive_dir {( //Get relative hitbox coords
+        old_pos + hitbox.hi - min,
+        target_pos + hitbox.hi - min
+      )} else {(
+        old_pos + hitbox.lo - min,
+        target_pos + hitbox.lo - min
+      )};
+
+      
+    
+
+
+
+    }
 
     
     
