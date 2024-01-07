@@ -4,9 +4,12 @@ use cgmath::{Vector3, Point3, Bounded, EuclideanSpace};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 
-use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::{Block, BlockSide}};
+use crate::world::chunk::ChunkDataView;
+
+use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::{Block, BlockSide, BlockSideVisibility}};
 
 pub const CHUNK_SIZE: usize = 32;
+pub const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
 pub const HEIGHTMAP_SIZE: usize = CHUNK_SIZE*CHUNK_SIZE;
 pub const CHUNK_LENGTH: usize = HEIGHTMAP_SIZE*CHUNK_SIZE;
 pub const CHUNK_RANGE: Range<usize> = 0..CHUNK_SIZE;
@@ -25,7 +28,7 @@ pub struct ChunkedTerrain {
 
 impl ChunkedTerrain {
   pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
-    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE as i32);
+    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE_I32);
     let chunk_id_bounds: [[i32; 3]; 2] = [
       player_chunk_id.map(|chk| chk-render_distance as i32).into(),
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
@@ -58,7 +61,7 @@ impl ChunkedTerrain {
 
   //Returns true if the chunk vertices need to be regenerated.
   pub fn update_player_position(&mut self, player_position: &PlayerPosition) -> bool { //Similar to the new() function but uses existing chunks if necessary.
-    let player_chunk_id: [i32; 3] = player_position.block_int.map(|val| val / CHUNK_SIZE as i32).into();
+    let player_chunk_id: [i32; 3] = player_position.block_int.map(|val| val / CHUNK_SIZE_I32).into();
     if player_chunk_id == self.player_last_chunk_id { //Skip the update if the player has not moved far enough to update the world.
       return false;
     }
@@ -178,14 +181,14 @@ impl ChunkedTerrain {
   
   pub fn get_block_at(&self, pos: Vector3<i32>) -> Option<Block> {
     
-    let div = pos / (CHUNK_SIZE as i32);
+    let div = pos / (CHUNK_SIZE_I32);
     let neg = pos.map(|v| if v < 0 {-1} else {0});
     let chunk_id = div+neg;
 
 
     let chunk = self.get_chunk_at(&chunk_id.into())?; //For some reason I've not used vector3s in my terrain data.
 
-    let inner_pos = pos - (chunk_id * (CHUNK_SIZE as i32));
+    let inner_pos = pos - (chunk_id * (CHUNK_SIZE_I32));
     let block = chunk.get_block_at(inner_pos.x, inner_pos.y, inner_pos.z)?;
 
     Some(block)
@@ -269,11 +272,19 @@ impl ChunkedTerrain {
     let (min, max) = (min.to_vec(), max.to_vec()); //Cast min and max to vectors. This should be a zero cost type cast.
 
     //Calculate player positions relative to the lesser corner of the hitbox check area.
+    //Don't know if I need this yet.
     let rel_old_pos = old_pos - min;
     let rel_new_pos = target_pos - min;
 
-    //TODO remove this because it's for debugging purposes only
-    println!("Min Pos: {min:?}, Max Pos: {max:?}");
+    //Get terrain information.
+    
+    for (x, y, z) in iproduct!(min.x..max.x, min.y..max.y, min.z..max.z) {
+      let pos = Vector3{x, y, z};
+      
+      
+      
+    }
+
     
     //Contains info about hitbox faces. `false` = select from lesser corner, `true` = select from greater corner.
     // const FACE_VERT_INFO: [[[bool; 3]; 2]; 6] = [
@@ -295,19 +306,12 @@ impl ChunkedTerrain {
       let is_positive_dir = side%2==0; //true = hi, false = lo
       let dir_dim = side/3; //0 = x, 1 = y, 2 = z
 
-      let (a_old, a_new) = if is_positive_dir {( //Get relative hitbox coords
-        old_pos + hitbox.hi - min,
-        target_pos + hitbox.hi - min
-      )} else {(
-        old_pos + hitbox.lo - min,
-        target_pos + hitbox.lo - min
-      )};
+      let [(a_old, b_old), (a_new, b_new)] = [old_pos, target_pos].map(|p|(
+        p - min + if is_positive_dir {hitbox.hi} else {hitbox.lo},
+        p - min + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
+      ));
 
-      
-    
-
-
-
+      //TODO continue from here.
     }
 
     
@@ -341,6 +345,49 @@ impl ChunkedTerrain {
       
     //   flagged //Return whether surface has collision.
     // })
+  }
+
+  
+  //Get visibility of blocks in a given area. This is used for hitbox testing.
+  //TODO implement this so that the borders of chunks are solid to prevent the player from passing through bad chunks.
+  fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> Vec<BlockSideVisibility> {
+    //Input validation check (this should never panic ideally).
+    min.zip(max, |mn, mx| if mn > mx {panic!("Invalid range passed to get_block_vis_area.")});
+
+
+    //Get positions of chunks we need.
+    let [cid_min, cid_max] = [min, max].map(|v| v / CHUNK_SIZE_I32);
+    //Create a range from positions.
+    let cid_len = cid_min.zip(cid_max, |mn, mx| mx - mn);
+
+    let mut vis_data = Vec::<BlockSideVisibility>::with_capacity(((max.x-min.x)*(max.y-min.y)*(max.z-min.z)) as usize); 
+    
+    let mut chunk_vis = Vec::new(); //probably not needed to use with_capacity as it won't usually be that many chunks
+
+    for (cx, cy, cz) in iproduct!(cid_min.x..cid_max.x, cid_min.y..cid_max.y, cid_min.z..cid_max.z) {
+      let data = self.get_chunk_at(&[cx, cy, cz]).map_or_else(|| ChunkDataView::new_blank(), |c| c.get_data_view());
+      chunk_vis.push(data);
+    }
+
+    for (x, y, z) in iproduct!(min.x..max.x, min.y..max.y, min.z..max.z) {
+      let rel_pos = Vector3::from([x, y, z]) - min; //Get relative position to the minimum.
+      let rel_pos_chunk = rel_pos / CHUNK_SIZE_I32;
+      let rel_chunk_offset = rel_pos.map(|v| v.rem_euclid(CHUNK_SIZE_I32)); //cgmath doesn't (yet) have rem_euclid built in, which is different to normal rem and useful for negative numbners.
+
+      //Get the chunk vis data from the `chunk_vis` vec.
+      let chunk_data = chunk_vis.get(
+        (rel_pos_chunk.z + //i made my variable names too long help
+        rel_pos_chunk.y * cid_len.z +
+        rel_pos_chunk.x * (cid_len.y * cid_len.z)) as usize
+      ).unwrap();
+
+      //Get visibility data.
+      let vis = chunk_data.get_block_at(rel_chunk_offset);
+
+      vis_data.push(vis);
+    }
+    
+    vis_data
   }
 
   fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
@@ -419,7 +466,6 @@ impl ChunkedTerrain {
 fn make_new_chunk(chunk_id: [i32; 3]) -> Arc<Chunk> {
   let new_chunk = Chunk::new(chunk_id);
   Arc::new(new_chunk)
-  
 }
 
 /// A column of chunks. Includes the heightmap for the chunk.
@@ -430,7 +476,7 @@ struct ChunkColumn {
 
 impl ChunkColumn {
   fn new(gen: &Perlin, chunk_xz: [i32; 2]) -> Self {
-    let noise_coords = chunk_xz.map(|val| (val*CHUNK_SIZE as i32) as f64);
+    let noise_coords = chunk_xz.map(|val| (val*CHUNK_SIZE_I32) as f64);
     
     let mut height_map: SurfaceHeightmap = [0i32; HEIGHTMAP_SIZE];
     for ((x,z), hm) in iproduct!(CHUNK_RANGE, CHUNK_RANGE).zip(height_map.iter_mut()) {

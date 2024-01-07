@@ -1,11 +1,13 @@
-use std::{sync::{Mutex, Arc, RwLock, TryLockError, MutexGuard}, ops::Range};
+use core::panic;
+use std::{sync::{Mutex, Arc, RwLock, TryLockError, MutexGuard, RwLockReadGuard}, ops::{Range, Deref}};
 
 use bytemuck_derive::{Zeroable, Pod};
+use cgmath::Vector3;
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 use wgpu::{Device, Queue};
 
-use crate::renderer::buffer::{GenericBuffer, GenericBufferType};
+use crate::{renderer::buffer::{GenericBuffer, GenericBufferType}, world::chunkedterrain::CHUNK_SIZE_I32};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
@@ -18,7 +20,7 @@ pub const ADJACENT_OFFSETS: [[i32; 3]; 6] = [
   [0, 0, -1]
 ];
 
-const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE as i32;
+const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE_I32;
 
 pub struct Chunk {
   chunk_id: [i32; 3],
@@ -32,6 +34,12 @@ pub struct Chunk {
 struct ChunkState {
   stage: ChunkStateStage,
   progress: ChunkStateProgress
+}
+
+///This is a temporary struct that keeps the RwLock for the chunk vis data unlocked for the lifetime of this struct.
+pub(crate) struct ChunkDataView<'a> {
+  //Make sure that data lives as long as the struct
+  data: Option<RwLockReadGuard<'a, Option<Vec<BlockSideVisibility>>>>
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
@@ -127,12 +135,12 @@ impl Chunk {
     }
 
     let chunk_pos = self.chunk_id.map(|chk| {
-      chk*CHUNK_SIZE as i32
+      chk*CHUNK_SIZE_I32
     });
 
 
     let mut blocks = Vec::<Block>::with_capacity(CHUNK_LENGTH);
-    for (x, y, z) in block_iterator() {
+    for (x, y, z) in Self::block_iterator() {
       let surface_level = surface_heightmap[x*CHUNK_SIZE + z];
       let actual_pos = [
         chunk_pos[0] + x as i32,
@@ -177,15 +185,6 @@ impl Chunk {
     });
   }
 
-  /// Convert a chunk-relative coordinate to its index in arrays. 
-  pub(super) fn rel_pos_to_index(x: i32, y: i32, z: i32) -> Option<usize> {
-    if CHUNK_RANGE_I32.contains(&x) && CHUNK_RANGE_I32.contains(&y) && CHUNK_RANGE_I32.contains(&z) {
-      Some(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize)
-    } else {
-      None
-    }
-  }
-
   //TODO optimise get_block_at into a separate struct for multiple accesses (means RwLock doesn't need many reads).
 
   /// Gets the block at the chunk-relative location. This willr return None if the blocks have not yet been loaded.
@@ -210,10 +209,10 @@ impl Chunk {
     match blocks {
       Some(blocks) => {
         ADJACENT_OFFSETS.map(|[ox, oy, oz]| { //Map offsets.
-          let (x_pos,y_pos,z_pos) = (ox + x, oy + y, oz + z);
+          let pos = Vector3::from([ox + x, oy + y, oz + z]);
 
-          if CHUNK_RANGE_I32.contains(&x_pos) && CHUNK_RANGE_I32.contains(&y_pos) && CHUNK_RANGE_I32.contains(&z_pos) {
-            Some(*blocks.get(x_pos as usize * CHUNK_SIZE * CHUNK_SIZE + y_pos as usize * CHUNK_SIZE + z_pos as usize).unwrap())
+          if Self::check_chunk_range(pos) {
+            Some(*blocks.get(pos.x as usize * CHUNK_SIZE * CHUNK_SIZE + pos.y as usize * CHUNK_SIZE + pos.z as usize).unwrap())
           } else {
             None
           }
@@ -266,7 +265,7 @@ impl Chunk {
     let block_read_lock = self.blocks.read().unwrap();
     let blocks = block_read_lock.as_ref().unwrap();
     let mut surface_visibility = Vec::<BlockSideVisibility>::with_capacity(blocks.len());
-    for ((x, y, z), block_ref) in block_iterator().zip(blocks.iter()) {
+    for ((x, y, z), block_ref) in Self::block_iterator().zip(blocks.iter()) {
       let block = *block_ref;
       if let Block::Air = block {
         surface_visibility.push(BlockSideVisibility::new(false));
@@ -321,11 +320,11 @@ impl Chunk {
     let block_vis = block_vis_lock.as_ref().expect("Please call gen_block_vis before generating vertices.");
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let chunk_pos = self.chunk_id.map(|val| val * CHUNK_SIZE as i32);
+    let chunk_pos = self.chunk_id.map(|val| val * CHUNK_SIZE_I32);
     
     const WINDING_ORDER: [u32; 6] = [0, 1, 2, 2, 3, 0];
 
-    for ((x, y, z), (block, block_visibility)) in block_iterator().zip(self.blocks.read().unwrap().as_ref().unwrap().iter().zip(block_vis)) {
+    for ((x, y, z), (block, block_visibility)) in Self::block_iterator().zip(self.blocks.read().unwrap().as_ref().unwrap().iter().zip(block_vis)) {
       if block_visibility.is_invisible() {continue}; //Skip invisible blocks.
       let colour = block.get_colour();
 
@@ -420,6 +419,76 @@ impl Chunk {
     }
     }
   }
+
+  ///Returns a reference for the block side visibility (if available). This is useful for accessing lots of chunk data at once without unlocking the rwlock for each block.
+  pub(super) fn get_data_view(&self) -> ChunkDataView {
+    if self.block_vis.read().unwrap().is_some() {
+      ChunkDataView {
+          data: Some(self.block_vis.read().unwrap()),
+      }
+    } else {
+      ChunkDataView::new_blank()
+    }
+    
+  }
+
+  //Static Utility functions
+
+  /// Convert a chunk-relative coordinate to its index in arrays. TODO: convert xyz to vec.
+  pub(super) fn rel_pos_to_index(x: i32, y: i32, z: i32) -> Option<usize> {
+    if Self::check_chunk_range(Vector3::from([x, y, z])) {
+      Some(x as usize * CHUNK_SIZE * CHUNK_SIZE + y as usize * CHUNK_SIZE + z as usize)
+    } else {
+      None
+    }
+  }
+  
+  ///Create an iterator over the corordinates in the chunk range.
+  fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
+    iproduct!(CHUNK_RANGE, CHUNK_RANGE, CHUNK_RANGE)
+  }
+  
+  ///Check if a local coordinate is within range.
+  fn check_chunk_range(pos: Vector3<i32>) -> bool {
+    CHUNK_RANGE_I32.contains(&pos.x) && CHUNK_RANGE_I32.contains(&pos.y) && CHUNK_RANGE_I32.contains(&pos.z)
+  }
+}
+
+impl ChunkDataView<'_> {
+  pub fn get_block_at(&self, pos: Vector3<i32>) -> BlockSideVisibility {
+    let index = Chunk::rel_pos_to_index(pos.x, pos.y, pos.z).expect("Coordinate outside of local chunk range!");
+
+    match &self.data {
+        Some(data) => {
+          match data.deref() {
+            Some(d) => {
+              *d.get(index).unwrap()
+            },
+            None => panic!("Chunk data is null!"),
+        }
+        },
+        None => { //Chunk vis data does not yet exist, so make the edges of the chunk solid.
+          let mut vis = BlockSideVisibility::new(false);
+          //TODO make less repetitive if possible.
+          vis.set_visible(BlockSide::Right, pos.x==CHUNK_SIZE_I32);
+          vis.set_visible(BlockSide::Left, pos.x==0);
+
+          vis.set_visible(BlockSide::Above, pos.y==CHUNK_SIZE_I32);
+          vis.set_visible(BlockSide::Below, pos.y==0);
+
+          vis.set_visible(BlockSide::Back, pos.z==CHUNK_SIZE_I32);
+          vis.set_visible(BlockSide::Front, pos.z==0);
+
+          vis
+        },
+    }
+  }
+
+  pub fn new_blank() -> Self {
+    Self {
+      data: None
+    }
+  }
 }
 
 // impl Drop for Chunk {
@@ -435,10 +504,6 @@ impl Chunk {
 //     }
 //   }
 // }
-
-fn block_iterator() -> impl Iterator<Item = (usize, usize, usize)> {
-  iproduct!(CHUNK_RANGE, CHUNK_RANGE, CHUNK_RANGE)
-}
 
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]

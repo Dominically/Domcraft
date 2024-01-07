@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, ops::{Add, AddAssign, SubAssign, Sub}, time::Duration};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, Vector2};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
 
 use crate::stolen::projection;
 
@@ -10,9 +10,6 @@ const SPEED_FACTOR: f32 = 0.5;
 const DEFAULT_FOV: f32 = 75.0;
 
 const DEFAULT_HITBOX: HitBox = HitBox {
-  // x: Vector2 {x: -0.5, y: 0.5},
-  // y: Vector2 {x: -1.5, y: 0.5}, //y is up
-  // z: Vector2 {x: -0.5, y: 0.5}
   lo: Vector3 {x: -0.5, y:-1.5, z: -0.5},
   hi: Vector3 {x: 0.5, y: 0.5, z: 0.5}
 };
