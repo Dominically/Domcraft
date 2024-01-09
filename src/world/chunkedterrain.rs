@@ -254,8 +254,6 @@ impl ChunkedTerrain {
    */
   pub fn get_collision_info(&self, old_pos: PlayerPosition, delta: Vector3<f32>, hitbox: &HitBox) -> PlayerPosition {
     let target_pos = old_pos + delta; //The position if there is no collision.
-    
-    let hitbox_size = hitbox.hi - hitbox.lo;
 
     //Calculate the absolute positions of the hitbox corners.
     let a1 = old_pos + hitbox.lo;
@@ -271,30 +269,7 @@ impl ChunkedTerrain {
 
     let (min, max) = (min.to_vec(), max.to_vec()); //Cast min and max to vectors. This should be a zero cost type cast.
 
-    //Calculate player positions relative to the lesser corner of the hitbox check area.
-    //Don't know if I need this yet.
-    let rel_old_pos = old_pos - min;
-    let rel_new_pos = target_pos - min;
-
-    //Get terrain information.
-    
-    for (x, y, z) in iproduct!(min.x..max.x, min.y..max.y, min.z..max.z) {
-      let pos = Vector3{x, y, z};
-      
-      
-      
-    }
-
-    
-    //Contains info about hitbox faces. `false` = select from lesser corner, `true` = select from greater corner.
-    // const FACE_VERT_INFO: [[[bool; 3]; 2]; 6] = [
-    //   [[true, true, true], [true, false, false]], //Right facing side (Pos X).
-    //   [[false, true, true], [false, false, false]], //Left facing side (Neg X).
-    //   [[true, true, true], [false, true, false]], //Upward facing side (Pos Y).
-    //   [[true, false, true], [false, false, false]], //Downward facing side (Neg Y).
-    //   [[true, true, true], [false, false, true]], //Backward facing side (Pos Z).
-    //   [[true, true, false], [false, false, false]] //Forward facing side (Neg Z).
-    // ];
+    let vis_data = self.get_block_vis_area(min, max);
 
     let sides_to_test = [ //Determine the faces which we need to test collision for (the direction the player is heading in).
       if delta.x >= 0.0 {0usize} else {1},
@@ -305,51 +280,52 @@ impl ChunkedTerrain {
     for side in sides_to_test { //Now test sides for collision.
       let is_positive_dir = side%2==0; //true = hi, false = lo
       let dir_dim = side/3; //0 = x, 1 = y, 2 = z
+      let block_side = BlockSide::try_from(side as u8).unwrap();
 
       let [(a_old, b_old), (a_new, b_new)] = [old_pos, target_pos].map(|p|(
-        p - min + if is_positive_dir {hitbox.hi} else {hitbox.lo},
-        p - min + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
+        p + if is_positive_dir {hitbox.hi} else {hitbox.lo},
+        p + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
       ));
+      
+      // //Temp assert testing
+      // let size = max - min + Vector3::from([1i32; 3]);
+      // assert_eq!(size.x * size.y * size.z, vis_data.len() as i32); 
 
-      //TODO continue from here.
+      //Iterate through relative coordinates.
+      for ((x, y, z), vis) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z).zip(&vis_data) {
+        if vis.get_visible(block_side) { //Block side has collision.
+          let block_abs_pos = Vector3::from([x, y, z]);
+          //Calculate relative positions of face
+          let [r_a_old, r_b_old, r_a_new, r_b_new] = [a_old, a_new, b_old, b_new].map(|p| (p - block_abs_pos).as_vec_f32());
+
+          //Get direction vectors (important because we use the fraction of this to calculate the time of collision).
+          let a_vec = r_a_new - r_a_old;
+          let b_vec = r_b_new - r_b_old;
+
+          for rel_side in 0..6 { //Now test each side of collision
+            let rel_dir_dim = rel_side/3;
+            let rel_is_positive_dir = rel_side%2==0;
+            if side/3 == dir_dim {continue} //Skip faces with the same dir dim.
+
+            //Find the intersection between hitbox and block plane.
+            let point = if rel_is_positive_dir {a_vec} else {b_vec}; //Start point to trace from.
+            
+
+            //TODO continue from here
+          }
+          
+        }
+      }
     }
 
     
     
     
     return target_pos; //TODO temp for now.
-    //This code is commented out because I don't think it's gonna work.
-
-    // //Calculate absolute block positions of hitbox.
-    // let ba = (old_pos + hitbox.a).block_int;
-    // let bb = (old_pos + hitbox.b).block_int;
-
-    // let test_surfaces = [
-    //   [ba, Point3::from([bb.x, bb.y, ba.z])],
-    //   [ba, Point3::from([bb.x, ba.y, bb.z])],
-    //   [ba, Point3::from([ba.x, bb.y, bb.z])],
-    //   [bb, Point3::from([ba.x, ba.y, bb.z])],
-    //   [bb, Point3::from([ba.x, bb.y, ba.z])],
-    //   [bb, Point3::from([bb.x, ba.y, ba.z])]
-    // ];
-
-    // test_surfaces.map(|[p, q]| { //Test from point p to point q and find collisions.
-    //   let flagged = false;
-    //   for (x, y, z) in iproduct!(p.x..q.x, p.y..q.y, p.z..q.z) {
-    //     let block = self.get_block_at(x, y, z);
-    //     match block {
-    //       Some(Block::Air) => {}, //Do nothign
-    //       _ =>
-    //     }
-    //   }
-      
-    //   flagged //Return whether surface has collision.
-    // })
   }
 
   
-  //Get visibility of blocks in a given area. This is used for hitbox testing.
-  //TODO implement this so that the borders of chunks are solid to prevent the player from passing through bad chunks.
+  ///Get visibility of blocks in a given area. This is used for hitbox testing.
   fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> Vec<BlockSideVisibility> {
     //Input validation check (this should never panic ideally).
     min.zip(max, |mn, mx| if mn > mx {panic!("Invalid range passed to get_block_vis_area.")});
@@ -358,18 +334,19 @@ impl ChunkedTerrain {
     //Get positions of chunks we need.
     let [cid_min, cid_max] = [min, max].map(|v| v / CHUNK_SIZE_I32);
     //Create a range from positions.
-    let cid_len = cid_min.zip(cid_max, |mn, mx| mx - mn);
+    let cid_len = cid_min.zip(cid_max, |mn, mx| mx - mn) + Vector3::from([1i32; 3]); //Add one to length because range is inclusive.
+
 
     let mut vis_data = Vec::<BlockSideVisibility>::with_capacity(((max.x-min.x)*(max.y-min.y)*(max.z-min.z)) as usize); 
     
     let mut chunk_vis = Vec::new(); //probably not needed to use with_capacity as it won't usually be that many chunks
 
-    for (cx, cy, cz) in iproduct!(cid_min.x..cid_max.x, cid_min.y..cid_max.y, cid_min.z..cid_max.z) {
+    for (cx, cy, cz) in iproduct!(cid_min.x..=cid_max.x, cid_min.y..=cid_max.y, cid_min.z..=cid_max.z) {
       let data = self.get_chunk_at(&[cx, cy, cz]).map_or_else(|| ChunkDataView::new_blank(), |c| c.get_data_view());
       chunk_vis.push(data);
     }
 
-    for (x, y, z) in iproduct!(min.x..max.x, min.y..max.y, min.z..max.z) {
+    for (x, y, z) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z) {
       let rel_pos = Vector3::from([x, y, z]) - min; //Get relative position to the minimum.
       let rel_pos_chunk = rel_pos / CHUNK_SIZE_I32;
       let rel_chunk_offset = rel_pos.map(|v| v.rem_euclid(CHUNK_SIZE_I32)); //cgmath doesn't (yet) have rem_euclid built in, which is different to normal rem and useful for negative numbners.
@@ -417,7 +394,6 @@ impl ChunkedTerrain {
         let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
-
 
       for ncy in green..blue {
         let reused_chunk = useful_old_chunks.next();

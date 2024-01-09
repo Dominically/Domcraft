@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, ops::{Add, AddAssign, SubAssign, Sub}, time::Duration};
 
-use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3};
+use cgmath::{Matrix4, Rad, Deg, Matrix3, Point3, num_traits::clamp, Vector3, EuclideanSpace};
 
 use crate::stolen::projection;
 
@@ -106,6 +106,13 @@ impl AddAssign<Vector3<f32>> for PlayerPosition {
 }
 
 //TODO cleanup messy boilerplate code.
+impl PlayerPosition {
+  //Not through an Into trait as I want to avoid casting to float as much as possible.
+  pub fn as_vec_f32(self) -> Vector3<f32> {
+    self.block_int.map(|v| v as f32).to_vec() + self.block_dec.to_vec()
+  }
+}
+
 impl Add<Vector3<f32>> for PlayerPosition {
     type Output = PlayerPosition;
 
