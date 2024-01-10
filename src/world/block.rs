@@ -39,7 +39,7 @@ impl Block {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum BlockSide {
   Right = 0,
   Left = 1,
@@ -92,7 +92,7 @@ impl TryFrom<u8> for BlockSide {
 /// This is so I can cull faces that can't be seen.
 #[derive(Debug, Copy, Clone)]
 pub struct BlockSideVisibility {
-  flags: u8 //Uses bit setting because i dont want to run out of ram again.
+  pub flags: u8 //Uses bit setting because i dont want to run out of ram again.
 }
 
 impl BlockSideVisibility {

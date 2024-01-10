@@ -452,6 +452,8 @@ impl Chunk {
   fn check_chunk_range(pos: Vector3<i32>) -> bool {
     CHUNK_RANGE_I32.contains(&pos.x) && CHUNK_RANGE_I32.contains(&pos.y) && CHUNK_RANGE_I32.contains(&pos.z)
   }
+
+  
 }
 
 impl ChunkDataView<'_> {

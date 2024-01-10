@@ -1,10 +1,11 @@
 use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
-use cgmath::{Vector3, Point3, Bounded, EuclideanSpace};
+use cgmath::{Vector3, Point3, Bounded, EuclideanSpace, num_traits::{Float, float::FloatCore, Signed}};
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
+use num_iter::{range_step_inclusive, RangeStepInclusive};
 
-use crate::world::chunk::ChunkDataView;
+use crate::world::{chunk::{ChunkDataView, self}, block};
 
 use super::{chunk::{Chunk, ChunkMeshData, ChunkStateStage, ADJACENT_OFFSETS}, player::{PlayerPosition, HitBox}, chunk_worker_pool::{ChunkTask, ChunkTaskType}, block::{Block, BlockSide, BlockSideVisibility}};
 
@@ -19,16 +20,21 @@ pub type SurfaceHeightmap = [i32; HEIGHTMAP_SIZE];
 pub struct ChunkedTerrain {
   columns: Vec<ChunkColumn>, //Sorted in x ascending, then z ascending,
   chunk_id_bounds: [[i32; 3]; 2],
-  player_last_chunk_id: [i32; 3], //The last Chunk ID of the player.
+  player_last_chunk_id: Vector3<i32>, //The last Chunk ID of the player.
   render_distance: u32,
   worker_pool_sender: Sender<ChunkTask>,
   gen: Arc<Perlin>,
   chunk_gc: Sender<Arc<Chunk>>
 }
 
+struct BlockVisArea {
+  data: Vec<BlockSideVisibility>,
+  size: Vector3<usize>
+}
+
 impl ChunkedTerrain {
   pub fn new(player_position: PlayerPosition, render_distance: u32, worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
-    let player_chunk_id = player_position.block_int.map(|val| val/CHUNK_SIZE_I32);
+    let player_chunk_id = Self::pos_to_chunk_id(player_position.block_int.to_vec());
     let chunk_id_bounds: [[i32; 3]; 2] = [
       player_chunk_id.map(|chk| chk-render_distance as i32).into(),
       player_chunk_id.map(|chk| chk+render_distance as i32).into()
@@ -61,7 +67,7 @@ impl ChunkedTerrain {
 
   //Returns true if the chunk vertices need to be regenerated.
   pub fn update_player_position(&mut self, player_position: &PlayerPosition) -> bool { //Similar to the new() function but uses existing chunks if necessary.
-    let player_chunk_id: [i32; 3] = player_position.block_int.map(|val| val / CHUNK_SIZE_I32).into();
+    let player_chunk_id = Self::pos_to_chunk_id(player_position.block_int.to_vec());
     if player_chunk_id == self.player_last_chunk_id { //Skip the update if the player has not moved far enough to update the world.
       return false;
     }
@@ -252,12 +258,14 @@ impl ChunkedTerrain {
     This will also prevent the player from entering chunks that are not yet generated.
 
    */
-  pub fn get_collision_info(&self, old_pos: PlayerPosition, delta: Vector3<f32>, hitbox: &HitBox) -> PlayerPosition {
-    let target_pos = old_pos + delta; //The position if there is no collision.
+  pub fn update_collision_info(&self, current_pos: &mut PlayerPosition, velocity: &mut Vector3<f32>, secs: f32, hitbox: &HitBox) {
+    let delta = *velocity * secs;
+    let target_pos = *current_pos + delta; //The position if there is no collision.
+
 
     //Calculate the absolute positions of the hitbox corners.
-    let a1 = old_pos + hitbox.lo;
-    let b1 = old_pos + hitbox.hi;
+    let a1 = *current_pos + hitbox.lo;
+    let b1 = *current_pos + hitbox.hi;
     let a2 = target_pos + hitbox.lo;
     let b2 = target_pos + hitbox.hi;
 
@@ -271,71 +279,126 @@ impl ChunkedTerrain {
 
     let vis_data = self.get_block_vis_area(min, max);
 
-    let sides_to_test = [ //Determine the faces which we need to test collision for (the direction the player is heading in).
-      if delta.x >= 0.0 {0usize} else {1},
-      if delta.y >= 0.0 {2} else {3},
-      if delta.z >= 0.0 {4} else {5}
-    ];
+    // let sides_to_test = [ //Determine the faces which we need to test collision for (the direction the player is heading in).
+    //   if delta.x >= 0.0 {0usize} else {1},
+    //   if delta.y >= 0.0 {2} else {3},
+    //   if delta.z >= 0.0 {4} else {5}
+    // ];
+    let mut min_t = 1.0; //Tick period at first collision.
+    let mut min_dim: Option<usize> = None;
 
-    for side in sides_to_test { //Now test sides for collision.
-      let is_positive_dir = side%2==0; //true = hi, false = lo
-      let dir_dim = side/3; //0 = x, 1 = y, 2 = z
-      let block_side = BlockSide::try_from(side as u8).unwrap();
+    for dir_dim in 0..3 { //Now test sides for collision.
+      let is_positive_dir = delta[dir_dim].is_positive(); //true = hi, false = lo
+      let block_side = BlockSide::try_from((dir_dim as u8)*2 + if is_positive_dir {1} else {0}).unwrap();
 
-      let [(a_old, b_old), (a_new, b_new)] = [old_pos, target_pos].map(|p|(
+      let [(a_old, /*b_old*/), (a_new,/* b_new*/)] = [*current_pos, target_pos].map(|p|(
         p + if is_positive_dir {hitbox.hi} else {hitbox.lo},
-        p + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
+        // p + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
       ));
+
+      //The orientation of these layers depends on the direction we are testing.
+
+      //Convert to f32 for ease of use.
+      let rel_a_old = (a_old - min).as_vec_f32();
+      let rel_a_new = (a_new - min).as_vec_f32();
       
-      // //Temp assert testing
+      let l_old = rel_a_old[dir_dim];
+      let l_new = rel_a_new[dir_dim];
+      
+      let layers = get_layers_between(l_old, l_new, false);
+      
+      if let Some(iter) = layers{
+        // println!("dir_dim: {0}, positive: {1}, layer_count: {2}, l_old: {l_old}, l_new: {l_new}", ["x","y","z"][dir_dim], is_positive_dir, iter.count());
+        'layer_loop: for layer in iter {
+          let t = (layer as f32 - l_old)/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
+          // println!("l: {layer}, t: {t}");
+          
+          let rel_a_pos = rel_a_old + (rel_a_new - rel_a_old) * t; //Get the position of the face at this point in time.
+          let rel_b_pos = {
+            let mut new_pos = rel_a_pos + if is_positive_dir {hitbox.lo} else {hitbox.hi};
+            new_pos[dir_dim] = rel_a_pos[dir_dim]; //Replace new_pos with old a_pos in current dim we are checking.
+            new_pos
+          };
+
+          //Create iterator over test range.
+          let [lx, ly, lz]: [RangeStepInclusive<i32>; 3] = rel_a_pos.zip(rel_b_pos, |a, b| 
+            range_step_inclusive(a.floor() as i32, b.floor() as i32, if a>b {-1i32} else {1})
+          ).into();
+
+          for (rel_x, rel_y, rel_z) in iproduct!(lx, ly, lz) {
+            let rel_usize = Vector3::from([rel_x as usize, rel_y as usize, rel_z as usize]);
+            let vis = vis_data.get_block_at(rel_usize);
+            if vis.get_visible(block_side) {
+              // break; //Break since we've already detected a collision
+              if t < min_t {
+                min_t = t;
+                min_dim = Some(dir_dim);
+              }
+              break 'layer_loop;
+            }
+          }
+          
+          // println!("rel_a_pos: {rel_a_pos:?}, rel_b_pos: {rel_b_pos:?}");
+        }
+      }
+
+
+      //Temp assert testing
+      // assert_eq!(a_old.block_int[dir_dim], b_old.block_int[dir_dim]);
+      // assert_eq!(b_new.block_int[dir_dim], b_new.block_int[dir_dim]);
+      // assert_eq!(a_old.block_dec[dir_dim], b_old.block_dec[dir_dim]);
+      // assert_eq!(b_new.block_dec[dir_dim], b_new.block_dec[dir_dim]);
       // let size = max - min + Vector3::from([1i32; 3]);
       // assert_eq!(size.x * size.y * size.z, vis_data.len() as i32); 
 
       //Iterate through relative coordinates.
-      for ((x, y, z), vis) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z).zip(&vis_data) {
-        if vis.get_visible(block_side) { //Block side has collision.
-          let block_abs_pos = Vector3::from([x, y, z]);
-          //Calculate relative positions of face
-          let [r_a_old, r_b_old, r_a_new, r_b_new] = [a_old, a_new, b_old, b_new].map(|p| (p - block_abs_pos).as_vec_f32());
+      // for ((x, y, z), vis) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z).zip(&vis_data) {
+      //   if vis.get_visible(block_side) { //Block side has collision.
+      //     let block_abs_pos = Vector3::from([x, y, z]);
+      //     //Calculate relative positions of face
+      //     let [r_a_old, r_b_old, r_a_new, r_b_new] = [a_old, a_new, b_old, b_new].map(|p| (p - block_abs_pos).as_vec_f32());
 
-          //Get direction vectors (important because we use the fraction of this to calculate the time of collision).
-          let a_vec = r_a_new - r_a_old;
-          let b_vec = r_b_new - r_b_old;
+      //     //Get direction vectors (important because we use the fraction of this to calculate the time of collision).
+      //     let a_vec = r_a_new - r_a_old;
+      //     let b_vec = r_b_new - r_b_old;
 
-          for rel_side in 0..6 { //Now test each side of collision
-            let rel_dir_dim = rel_side/3;
-            let rel_is_positive_dir = rel_side%2==0;
-            if side/3 == dir_dim {continue} //Skip faces with the same dir dim.
+      //     for rel_side in 0..6 { //Now test each side of collision
+      //       let rel_dir_dim = rel_side/3;
+      //       let rel_is_positive_dir = rel_side%2==0;
+      //       if side/3 == dir_dim {continue} //Skip faces with the same dir dim.
 
-            //Find the intersection between hitbox and block plane.
-            let point = if rel_is_positive_dir {a_vec} else {b_vec}; //Start point to trace from.
+      //       //Find the intersection between hitbox and block plane.
+      //       let point = if rel_is_positive_dir {a_vec} else {b_vec}; //Start point to trace from.
             
 
-            //TODO continue from here
-          }
+      //       //TODO continue from here
+      //     }
           
-        }
-      }
+      //   }
+      // }
     }
 
     
     
+    *current_pos += *velocity * min_t * secs; //TODO temp for now.
     
-    return target_pos; //TODO temp for now.
+    if let Some(dim) = min_dim { //Set velocity of collision direction to 0.
+      velocity[dim] = 0.0;
+    }
   }
 
   
   ///Get visibility of blocks in a given area. This is used for hitbox testing.
-  fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> Vec<BlockSideVisibility> {
+  fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> BlockVisArea {
     //Input validation check (this should never panic ideally).
     min.zip(max, |mn, mx| if mn > mx {panic!("Invalid range passed to get_block_vis_area.")});
 
 
     //Get positions of chunks we need.
-    let [cid_min, cid_max] = [min, max].map(|v| v / CHUNK_SIZE_I32);
+    let [cid_min, cid_max] = [min, max].map(|vec| Self::pos_to_chunk_id(vec));
+    
     //Create a range from positions.
     let cid_len = cid_min.zip(cid_max, |mn, mx| mx - mn) + Vector3::from([1i32; 3]); //Add one to length because range is inclusive.
-
 
     let mut vis_data = Vec::<BlockSideVisibility>::with_capacity(((max.x-min.x)*(max.y-min.y)*(max.z-min.z)) as usize); 
     
@@ -343,28 +406,34 @@ impl ChunkedTerrain {
 
     for (cx, cy, cz) in iproduct!(cid_min.x..=cid_max.x, cid_min.y..=cid_max.y, cid_min.z..=cid_max.z) {
       let data = self.get_chunk_at(&[cx, cy, cz]).map_or_else(|| ChunkDataView::new_blank(), |c| c.get_data_view());
+      // let data = ChunkDataView::new_blank();
       chunk_vis.push(data);
     }
-
     for (x, y, z) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z) {
-      let rel_pos = Vector3::from([x, y, z]) - min; //Get relative position to the minimum.
-      let rel_pos_chunk = rel_pos / CHUNK_SIZE_I32;
-      let rel_chunk_offset = rel_pos.map(|v| v.rem_euclid(CHUNK_SIZE_I32)); //cgmath doesn't (yet) have rem_euclid built in, which is different to normal rem and useful for negative numbners.
-
+      let pos = Vector3::from([x, y, z]);
+      let rel_chunk = Self::pos_to_chunk_id(pos) - cid_min;
+      let chunk_offset = pos.map(|v| v.rem_euclid(CHUNK_SIZE_I32)); //cgmath doesn't (yet) have rem_euclid built in, which is different to normal rem and useful for negative numbners.
+      
+      if pos != (rel_chunk+cid_min)*CHUNK_SIZE_I32+chunk_offset {
+        panic!("Bad position: {pos:?}, cid_min: {cid_min:?}, rel_chunk: {rel_chunk:?}, chunk_offset: {chunk_offset:?}");
+      }
       //Get the chunk vis data from the `chunk_vis` vec.
       let chunk_data = chunk_vis.get(
-        (rel_pos_chunk.z + //i made my variable names too long help
-        rel_pos_chunk.y * cid_len.z +
-        rel_pos_chunk.x * (cid_len.y * cid_len.z)) as usize
+        (rel_chunk.z + //i made my variable names too long help
+        rel_chunk.y * cid_len.z +
+        rel_chunk.x * (cid_len.y * cid_len.z)) as usize
       ).unwrap();
 
       //Get visibility data.
-      let vis = chunk_data.get_block_at(rel_chunk_offset);
+      let vis = chunk_data.get_block_at(chunk_offset);
 
       vis_data.push(vis);
     }
     
-    vis_data
+    BlockVisArea {
+      data: vis_data,
+      size: (max - min).map(|int| int as usize + 1) //Add 1 because it is inclusive.
+    }
   }
 
   fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
@@ -379,7 +448,7 @@ impl ChunkedTerrain {
     let old_chunk_list = mem::replace(&mut column.chunks, Vec::<Arc<Chunk>>::with_capacity(y_range_size as usize));
     
     if new_start < old_end || new_end > old_start { //If there is an overlap.
-      //Varaible names correspond to arrayshit.png
+      //Varaible names correspond to arraystuff.png
       let red = (new_start - old_start).max(0);
       let green = old_start.max(new_start);
       let blue = old_end.min(new_end);
@@ -437,6 +506,10 @@ impl ChunkedTerrain {
       }
     }
   }
+
+  pub fn pos_to_chunk_id(pos: Vector3<i32>) -> Vector3<i32> {
+    pos.map(|v| if v < 0 {(v+1)/CHUNK_SIZE_I32 - 1} else {v / CHUNK_SIZE_I32})
+  }
 }
 
 fn make_new_chunk(chunk_id: [i32; 3]) -> Arc<Chunk> {
@@ -476,10 +549,40 @@ impl ChunkColumn {
   }
 }
 
+impl BlockVisArea {
+  fn get_block_at(&self, pos: Vector3<usize>) -> BlockSideVisibility {
+    //Bounds check.
+    self.size.zip(pos, |s, p| if p >= s {
+      panic!("Invalid block position. Pos: {0:?}. Size: {1:?}.", pos, self.size);
+    });
+
+    *self.data.get(pos.x * self.size.y * self.size.z + pos.y * self.size.z + pos.z).unwrap()
+  }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum ChunkRegenCoord {
   None,
   One(i32),
   Both(i32, i32)
 }
- 
+
+
+//Create an iterator of ints between 2 float points.
+fn get_layers_between(a: f32, b: f32, inclusive: bool) -> Option<RangeStepInclusive<i32>> {
+  let is_reversed = a>b;
+  let (a_round, b_round) = if is_reversed ^ /* XOR */ inclusive {( //Is reversed. a is greater.
+    a.floor().trunc() as i32,
+    b.ceil().trunc() as i32
+  )} else {( //Not reversed. b is greater.
+    a.ceil().trunc() as i32,
+    b.floor().trunc() as i32
+  )};
+
+  //TODO fix bug here.
+  if (!is_reversed && a_round>b_round) || (is_reversed && b_round>a_round) { //No blocks checked.
+    None
+  } else {
+    Some(range_step_inclusive(a_round, b_round, if is_reversed {-1} else {1})) //Cast to f32 for further calculation
+  }
+}

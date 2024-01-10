@@ -90,9 +90,8 @@ impl Player {
     let secs = dt.as_secs_f32();
     let factor = secs/(secs + SPEED_FACTOR);
     self.velocity += diff * factor;
-    let position_delta = self.velocity * secs;
     
-    self.position = terrain.get_collision_info(self.position, position_delta, &self.hitbox);
+    terrain.update_collision_info(&mut self.position, &mut self.velocity, secs, &self.hitbox);
 
   }
 }
@@ -164,6 +163,7 @@ impl Sub<Vector3<i32>> for PlayerPosition {
       self + -rhs
   }
 }
+
 
 #[cfg(test)]
 mod test {

@@ -14,7 +14,8 @@ pub mod chunk_worker_pool;
 
 
 const MOUSE_SENS: Rad<f32> = Rad(0.002); //Rads per dot.
-const NOCLIP_SPEED: f32 = 40.0; //blocks/sec
+const NOCLIP_SPEED: f32 = 120.0; //blocks/sec
+
 
 pub struct World {
   terrain: ChunkedTerrain,
