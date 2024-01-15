@@ -3,7 +3,9 @@ use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI,
 use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp, EuclideanSpace};
 use winit::event::VirtualKeyCode;
 
-use self::{player::{Player, PlayerPosition}, controls::{Controller, Control}, chunkedterrain::{ChunkedTerrain, CHUNK_SIZE}, chunk_worker_pool::ChunkTask, chunk::Chunk, block::Block};
+use crate::util::FPVector;
+
+use self::{player::{Player, PlayerPosC}, controls::{Controller, Control}, chunkedterrain::{ChunkedTerrain, CHUNK_SIZE}, chunk_worker_pool::ChunkTask, chunk::Chunk, block::Block};
 
 mod block;
 mod player;
@@ -28,10 +30,12 @@ pub struct World {
 
 impl World {
   pub fn new(worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
-    let player_pos = PlayerPosition {
-        block_int: [1, 40, 1].into(),
-        block_dec: [0.0; 3].into(),
-    };
+    // let player_pos = PlayerPosC {
+    //     block_int: [1, 40, 1].into(),
+    //     block_dec: [0.0; 3].into(),
+    // };
+
+    let player_pos: FPVector = [1i32, 40, 1].into();
     
     let player = Player::new(player_pos.into());
     
@@ -70,8 +74,8 @@ impl World {
     self.player.get_view_matrix(aspect_ratio, delta_t)
   }
 
-  pub fn get_player_pos(&self) -> PlayerPosition {
-    self.player.get_position()
+  pub fn get_player_pos_c(&self) -> PlayerPosC {
+    self.player.get_pos_c()
   }
 
 
@@ -102,10 +106,10 @@ impl World {
     self.terrain.update_player_position(&self.player.get_position());
     self.terrain.tick_progress();
 
-    //For testing purposes only.
-    let p_pos = self.get_player_pos();
-    let p = p_pos.block_int.to_vec();
-    let b = self.get_terrain().get_block_at(p);
+    // //For testing purposes only.
+    // let p_pos = self.get_player_pos();
+    // let p = p_pos.block_int.to_vec();
+    // let b = self.get_terrain().get_block_at(p);
   }
 
   pub fn key_update(&mut self, key: VirtualKeyCode, state: bool) {

@@ -1,5 +1,6 @@
 use std::{sync::{Mutex, Arc, mpsc::{channel, Receiver}}, thread, time::{Instant, Duration}};
 
+use cgmath::Vector3;
 use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState, VirtualKeyCode}, dpi::PhysicalPosition};
 use world::{chunk_worker_pool, chunk::Chunk};
 
@@ -7,13 +8,27 @@ use crate::{renderer::Renderer, world::World};
 
 mod renderer;
 mod world;
-mod stolen;
+mod util;
 
 pub type ArcWorld = Arc<Mutex<World>>;
 
 fn main() {
   println!("Starting Domcraft...");
   pollster::block_on(run());
+  // do_thing();
+}
+
+type FixedPoint = fixed::FixedI64::<fixed::types::extra::U32>;
+fn fixed(val: f32) -> FixedPoint{
+  FixedPoint::from_num(val)
+}
+
+fn do_thing() {
+  let a = Vector3::from([12.5, 0.0, -5.2].map(fixed));
+  let b = Vector3::from([1.2, 2.3, 3.4].map(fixed));
+  let floored: Vector3<i32> = a.map(|v| v.to_num());
+  println!("Test: {:?}", a);
+  println!("Floored: {:?}", floored);
 }
 
 async fn run() {

@@ -250,7 +250,7 @@ impl Renderer {
       let world_lock = world.lock().unwrap();
       (
         world_lock.get_player_view(self.size.width as f32/self.size.height as f32), 
-        world_lock.get_player_pos(),
+        world_lock.get_player_pos_c(),
         world_lock.get_terrain().get_meshes(),
         world_lock.get_daylight_data()
       )
