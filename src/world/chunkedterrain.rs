@@ -301,19 +301,29 @@ impl ChunkedTerrain {
 
       let layers = get_layers_between(l_old, l_new, false);
       
+      
       if let Some(iter) = layers{
         'layer_loop: for layer in iter {
-          let t = (Fixed64::from_num(layer) - l_old)/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
+          let layer_fixed64 = Fixed64::from_num(layer);
+          let t = (layer_fixed64 - l_old)/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
           
-          let rel_a_pos = rel_a_old + (rel_a_new - rel_a_old) * t; //Get the position of the face at this point in time.
+          let rel_a_pos = {
+            let mut pos = rel_a_old + (rel_a_new - rel_a_old) * t; //Get the position of the face at this point in time.
+            pos.inner[dir_dim] = layer_fixed64; //Set layer to full integer to prevent precision errors.
+            pos
+          };
+          
           let rel_b_pos = {
-            let mut new_pos = rel_a_pos + if is_positive_dir {hitbox.lo} else {hitbox.hi};
-            new_pos.inner[dir_dim] = rel_a_pos.inner[dir_dim]; //Replace new_pos with old a_pos in current dim we are checking.
+            let mut new_pos = rel_a_pos + if is_positive_dir {hitbox.lo - hitbox.hi} else {hitbox.hi - hitbox.lo};
+            new_pos.inner[dir_dim] = layer_fixed64; //Replace new_pos with old a_pos in current dim we are checking.
             new_pos
           };
+          // println!("ppos: {:?}", current_pos.inner);
+          // println!("fpos: {:?} to {:?}", (rel_a_pos + min.into()).inner, (rel_b_pos + min.into()).inner);
+          
+          // println!("ipos: {:?} to {:?}", (rel_a_pos + min.into()).get_int(), (rel_b_pos + min.into()).get_int());
 
-          println!("a_pos: {:?}", rel_a_pos.get_int() + min);
-          println!("b_pos: {:?}", rel_b_pos.get_int() + min);
+          // println!("layer: {:?}", layer);
 
           //Create iterator over test range.
           let [lx, ly, lz]: [RangeStepInclusive<i32>; 3] = rel_a_pos.inner.zip(rel_b_pos.inner, |a, b| 
@@ -325,7 +335,7 @@ impl ChunkedTerrain {
             let vis = vis_data.get_block_at(rel_usize);
             if vis.get_visible(block_side) {
               // break; //Break since we've already detected a collision
-              println!("Collision Detected");
+              // println!("Collision Detected");
               if t < min_t {
                 min_t = t;
                 min_dim = Some(dir_dim);
@@ -339,11 +349,11 @@ impl ChunkedTerrain {
     
     let velocity_fpv: FPVector = (*velocity).into();
 
-    *current_pos += velocity_fpv * (/*min_t * */ Fixed64::from_num(secs)); //TODO temp for now.
+    *current_pos += velocity_fpv * (min_t * Fixed64::from_num(secs)); //TODO temp for now.
 
 
     if let Some(dim) = min_dim { //Set velocity of collision direction to 0.
-      // velocity[dim] = 0.0;
+      velocity[dim] = 0.0;
       // println!("Collision detected.");
     }
   }
