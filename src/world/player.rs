@@ -12,6 +12,8 @@ const DEFAULT_FOV: f32 = 75.0;
 const DEFAULT_HITBOX: HitBox = HitBox {
   // lo: [-0.5, -1.5, -0.5].into(),
   // hi: [0.5, 0.5, 0.5].into()
+
+  //WARNING: DO NOT USE RECURRING DECIMALS.
   lo: FPVector { inner: Vector3 { x: Fixed64::lit("-0.5"), y: Fixed64::lit("-1.5"), z: Fixed64::lit("-0.5") } },
   hi: FPVector { inner: Vector3 { x: Fixed64::lit("0.5"), y: Fixed64::lit("0.5"), z: Fixed64::lit("0.5") } },
 };

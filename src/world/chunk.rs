@@ -20,6 +20,8 @@ pub const ADJACENT_OFFSETS: [[i32; 3]; 6] = [
   [0, 0, -1]
 ];
 
+const SUPERFLAT_MODE: bool = false;
+
 const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE_I32;
 
 pub struct Chunk {
@@ -149,6 +151,11 @@ impl Chunk {
       ];
 
       let ypos = actual_pos[1];
+      if SUPERFLAT_MODE {
+        blocks.push(if actual_pos[1] > 0 {Block::Air} else {Block::Grass});
+        continue;
+      }
+
       let block = if ypos > surface_level {
           const CLOUD_LEVEL: i32 = 120;
           const CLOUD_DIST: i32 = 40;

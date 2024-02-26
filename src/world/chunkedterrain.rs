@@ -278,7 +278,7 @@ impl ChunkedTerrain {
     let vis_data = self.get_block_vis_area(min, max);
 
     let mut min_t = Fixed64::ONE; //Tick period at first collision.
-    let mut min_dim: Option<usize> = None;
+    let mut intersect_data: [Option<Fixed64>; 3] = [None; 3];
 
     for dir_dim in 0..3 { //Now test sides for collision.
       let is_positive_dir = delta[dir_dim].is_positive(); //true = hi, false = lo
@@ -305,6 +305,8 @@ impl ChunkedTerrain {
       if let Some(iter) = layers{
         'layer_loop: for layer in iter {
           let layer_fixed64 = Fixed64::from_num(layer);
+
+          //TODO stop using t and min_t for colliding dimension.
           let t = (layer_fixed64 - l_old)/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
           
           let rel_a_pos = {
@@ -318,12 +320,6 @@ impl ChunkedTerrain {
             new_pos.inner[dir_dim] = layer_fixed64; //Replace new_pos with old a_pos in current dim we are checking.
             new_pos
           };
-          // println!("ppos: {:?}", current_pos.inner);
-          // println!("fpos: {:?} to {:?}", (rel_a_pos + min.into()).inner, (rel_b_pos + min.into()).inner);
-          
-          // println!("ipos: {:?} to {:?}", (rel_a_pos + min.into()).get_int(), (rel_b_pos + min.into()).get_int());
-
-          // println!("layer: {:?}", layer);
 
           //Create iterator over test range.
           let [lx, ly, lz]: [RangeStepInclusive<i32>; 3] = rel_a_pos.inner.zip(rel_b_pos.inner, |a, b| 
@@ -334,11 +330,11 @@ impl ChunkedTerrain {
             let rel_usize = Vector3::from([rel_x as usize, rel_y as usize, rel_z as usize]);
             let vis = vis_data.get_block_at(rel_usize);
             if vis.get_visible(block_side) {
-              // break; //Break since we've already detected a collision
-              // println!("Collision Detected");
-              if t < min_t {
+              if t <= min_t {
                 min_t = t;
-                min_dim = Some(dir_dim);
+                let dim_pos = Fixed64::from_num(min[dir_dim]) + layer_fixed64 - if is_positive_dir {hitbox.hi.inner[dir_dim]} else {hitbox.lo.inner[dir_dim]};
+                
+                intersect_data[dir_dim] = Some(dim_pos);
               }
               break 'layer_loop;
             }
@@ -349,13 +345,22 @@ impl ChunkedTerrain {
     
     let velocity_fpv: FPVector = (*velocity).into();
 
-    *current_pos += velocity_fpv * (min_t * Fixed64::from_num(secs)); //TODO temp for now.
+    let mut new_pos = *current_pos + velocity_fpv * (min_t * Fixed64::from_num(secs)); //TODO temp for now.
 
+    // if current_pos.inner.y >= 1.5 && new_pos.inner.y < 1.5 {
+    //   println!("Passing through floor.");
+    // }
 
-    if let Some(dim) = min_dim { //Set velocity of collision direction to 0.
-      velocity[dim] = 0.0;
-      // println!("Collision detected.");
+    for (i_dim, i_val) in intersect_data.iter().enumerate() {
+      if let Some(val) = *i_val {
+        //TODO collision resolution here.
+        new_pos.inner[i_dim] = val;
+        velocity[i_dim] = 0.0;
+      }
     }
+
+    
+    *current_pos = new_pos;
   }
 
   
