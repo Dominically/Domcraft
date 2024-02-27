@@ -1,6 +1,7 @@
 use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
-use cgmath::{Vector3, num_traits::Signed};
+use cgmath::{num_traits::Signed, InnerSpace, Vector3};
+use fixed::traits::Fixed;
 use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 use num_iter::{range_step_inclusive, RangeStepInclusive};
@@ -281,6 +282,8 @@ impl ChunkedTerrain {
     let mut intersect_data: [Option<Fixed64>; 3] = [None; 3];
 
     for dir_dim in 0..3 { //Now test sides for collision.
+      if delta[dir_dim] == 0.0 {continue}; //Skip if the object is not moving in this direction.
+
       let is_positive_dir = delta[dir_dim].is_positive(); //true = hi, false = lo
       let block_side = BlockSide::try_from((dir_dim as u8)*2 + if is_positive_dir {1} else {0}).unwrap();
 
@@ -359,7 +362,10 @@ impl ChunkedTerrain {
       }
     }
 
-    
+    if min_t < Fixed64::ONE && velocity.magnitude() > 0.0{ //If tick has not been fully processed and player is still moving.
+      self.update_collision_info(&mut new_pos, velocity, secs * (1.0f32 - min_t.to_num::<f32>()), hitbox);
+    }
+
     *current_pos = new_pos;
   }
 

@@ -1,5 +1,6 @@
 mod texture;
 pub mod buffer;
+pub mod ui;
 
 use std::{fs::File, io::Read, borrow::Cow, sync::Arc, mem::size_of};
 
