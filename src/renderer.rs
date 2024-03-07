@@ -1,71 +1,20 @@
 mod texture;
 pub mod buffer;
-pub mod ui;
 
 use std::{fs::File, io::Read, borrow::Cow, sync::Arc, mem::size_of};
 
 use bytemuck_derive::{Pod, Zeroable};
+use imgui::{Context, FontSource};
 use itertools::Itertools;
 use wgpu::{
-  Instance,
-  Backends,
-  RequestAdapterOptions,
-  PowerPreference,
-  DeviceDescriptor,
-  Device,
-  Queue,
-  BufferUsages,
-  VertexBufferLayout,
-  VertexAttribute,
-  Buffer,
-  ShaderModuleDescriptor,
-  ShaderSource,
-  RenderPipelineDescriptor,
-  FragmentState,
-  VertexState,
-  MultisampleState,
-  PipelineLayoutDescriptor,
-  PrimitiveState,
-  PrimitiveTopology,
-  FrontFace,
-  Face,
-  PolygonMode,
-  RenderPipeline,
-  Surface,
-  ColorTargetState,
-  ColorWrites,
-  BlendState,
-  SurfaceConfiguration,
-  TextureUsages,
-  RenderPassDescriptor,
-  RenderPassColorAttachment,
-  Operations,
-  Color,
-  CommandEncoderDescriptor,
-  VertexStepMode,
-  VertexFormat,
-  BufferDescriptor,
-  BindGroupLayoutDescriptor,
-  BindGroupLayoutEntry,
-  ShaderStages,
-  BindingType,
-  BufferBindingType,
-  BindGroupDescriptor,
-  BindGroupEntry,
-  BindGroup,
-  DepthStencilState,
-  CompareFunction,
-  StencilState,
-  DepthBiasState,
-  RenderPassDepthStencilAttachment,
-  LoadOp,
-  IndexFormat,
-  InstanceDescriptor, StoreOp
+  Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferBindingType, BufferDescriptor, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompareFunction, DepthBiasState, DepthStencilState, Device, DeviceDescriptor, Face, FragmentState, FrontFace, IndexFormat, Instance, InstanceDescriptor, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, StoreOp, Surface, SurfaceConfiguration, TextureUsages, TextureView, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode
 };
 
 use winit::{window::Window, dpi::PhysicalSize};
 
 use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
+
+use imgui_winit_support::{WinitPlatform, HiDpiMode};
 
 pub struct Renderer {
   surface: Surface,
@@ -77,7 +26,16 @@ pub struct Renderer {
   depth_texture: Texture,
   pipeline: RenderPipeline,
   size: PhysicalSize<u32>,
-  world: Option<ArcWorld>
+  world: Option<ArcWorld>,
+  imgui: RendererImgui,
+  // imgui_renderer: imgui_wgpu::Renderer,
+  // imgui_platform: WinitPlatform,
+}
+
+struct RendererImgui {
+  ui: Context,
+  renderer: imgui_wgpu::Renderer,
+  platform: WinitPlatform,
 }
 
 //Modified from https://sotrh.github.io/learn-wgpu/
@@ -116,7 +74,16 @@ impl Renderer {
       alpha_mode: surface_caps.alpha_modes[0],
       view_formats: Vec::new(),
     };
+
+    //Imgui setup from: https://github.com/Yatekii/imgui-wgpu-rs/blob/master/examples/hello-world.rs
+    let imgui = RendererImgui::new(window, &device, &queue, &surface_cfg);
     
+
+
+
+
+
+
     println!("Using {} for rendering.", adapter.get_info().name);
 
     let mut shader_file = File::open("./shaders/shader.wgsl").map_err(|_| RendererCreateError::ShaderLoadError)?;
@@ -218,6 +185,7 @@ impl Renderer {
       pipeline,
       size,
       world: None,
+      imgui,
     })
   }
 
@@ -240,6 +208,8 @@ impl Renderer {
   }
 
   pub fn render(&mut self) -> Result<(), RenderError> {
+    
+
     let world = match self.world.as_ref() {
         Some(w) => w,
         None => {
@@ -269,6 +239,7 @@ impl Renderer {
 
     let out = self.surface.get_current_texture().map_err(|_| RenderError::SurfaceError)?;
     let view = out.texture.create_view(&Default::default());
+    let depth_view = &self.depth_texture.view;
 
     let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
       label: Some("very cool command encoder")
@@ -295,7 +266,7 @@ impl Renderer {
         })],
         label: Some("Screen pass"),
         depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-          view: &self.depth_texture.view,
+          view: &depth_view,
           depth_ops: Some(Operations {
               load: LoadOp::Clear(1.0),
               store: StoreOp::Store,
@@ -316,11 +287,92 @@ impl Renderer {
       
     }
 
+    self.imgui.render(&mut encoder, &self.device, &self.queue, &view, &depth_view)?;
+
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
+    // let imgui_command_buffer = self.imgui.renderer.render(draw_data, queue, device, rpass);
+    
     out.present();
 
     Ok(())
+  }
+}
+
+impl RendererImgui {
+  fn new(window: &Window, device: &Device, queue: &Queue, surface_cfg: &SurfaceConfiguration) -> Self {
+    //Setup imgui.
+    let mut imgui_ctx = imgui::Context::create();
+    imgui_ctx.set_ini_filename(None);
+
+    //Bind imgui I/O to winit.
+    let mut imgui_platform = WinitPlatform::init(&mut imgui_ctx);
+    imgui_platform.attach_window(imgui_ctx.io_mut(), &window, HiDpiMode::Default);
+
+    let imgui_renderer_cfg = imgui_wgpu::RendererConfig {
+        texture_format: surface_cfg.format,
+        depth_format: Some(Texture::DEPTH_FORMAT),
+        ..Default::default()
+        // sample_count: todo!(),
+        // shader: todo!(),
+        // vertex_shader_entry_point: todo!(),
+        // fragment_shader_entry_point: todo!(),
+    };
+
+    let hidpi_factor = window.scale_factor();
+
+    let font_size = (13.0 * hidpi_factor) as f32;
+    imgui_ctx.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+
+    imgui_ctx.fonts().add_font(&[FontSource::DefaultFontData {
+        config: Some(imgui::FontConfig {
+            oversample_h: 1,
+            pixel_snap_h: true,
+            size_pixels: font_size,
+            ..Default::default()
+        }),
+    }]);
+
+    let imgui_renderer = imgui_wgpu::Renderer::new(&mut imgui_ctx, &device, &queue, imgui_renderer_cfg);
+
+    RendererImgui {
+      ui: imgui_ctx,
+      platform: imgui_platform,
+      renderer: imgui_renderer
+    }
+  }
+
+  fn render(&mut self, encoder: &mut CommandEncoder, device: &Device, queue: &Queue, view: &TextureView, depth_view: &TextureView) -> Result<(), RenderError> {
+    let frame = self.ui.frame();
+    let mut demo_open = true;
+    frame.show_demo_window(&mut demo_open); //testing demo window.
+    
+    let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
+        label: Some("Imgui render pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+          view: &view,
+          resolve_target: None,
+          ops: wgpu::Operations {
+              load: wgpu::LoadOp::Load,
+              store: wgpu::StoreOp::Store,
+          },
+        })],
+        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+          view: &depth_view,
+          depth_ops: Some(Operations {
+              load: LoadOp::Load,
+              store: StoreOp::Store,
+          }),
+          stencil_ops: None,
+        }), //TODO attach depth buffer to imgui
+        timestamp_writes: None,
+        occlusion_query_set: None,
+    });
+
+    self.renderer.render(self.ui.render(), queue, device, &mut rpass).map_err(|_| RenderError::ImguiError)?;
+
+    Ok(())
+    
   }
 }
 
@@ -380,5 +432,6 @@ pub enum RendererCreateError {
 #[derive(Debug)]
 pub enum RenderError {
   SurfaceError,
-  NoWorldError
+  NoWorldError,
+  ImguiError
 }
