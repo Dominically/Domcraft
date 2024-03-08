@@ -30,11 +30,6 @@ pub struct World {
 
 impl World {
   pub fn new(worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
-    // let player_pos = PlayerPosC {
-    //     block_int: [1, 40, 1].into(),
-    //     block_dec: [0.0; 3].into(),
-    // };
-
     let player_pos: FPVector = [1i32, 40, 1].into();
     
     let player = Player::new(player_pos.into());
@@ -55,7 +50,8 @@ impl World {
       (VirtualKeyCode::Down, Control::Backward),
       (VirtualKeyCode::Right, Control::Right),
       (VirtualKeyCode::RShift, Control::Up),
-      (VirtualKeyCode::RControl, Control::Down)
+      (VirtualKeyCode::RControl, Control::Down),
+      (VirtualKeyCode::LAlt, Control::UnlockMouse)
     ]);
 
     let uptime = Duration::new(0, 0);
@@ -137,6 +133,10 @@ impl World {
     let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.5, 1.0);
 
     WorldLightData { sun_direction, light_level }
+  }
+
+  pub fn is_mouse_unlocked(&self) -> bool {
+    self.controller.get_action(Control::UnlockMouse)
   }
 
   fn since_last_tick(&self) -> Duration {

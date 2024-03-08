@@ -15,7 +15,8 @@ pub enum Control {
   Left,
   Right,
   Up,
-  Down
+  Down,
+  UnlockMouse
 }
 
 impl Controller {
@@ -58,11 +59,11 @@ impl Controller {
     let b_pressed = self.get_action(b.0);
 
     if a_pressed && !b_pressed {
-      return a.1;
+      a.1
     } else if b_pressed && !a_pressed {
-      return b.1;
+      b.1
     } else {
-      return default;
+      default
     }
   }
 }

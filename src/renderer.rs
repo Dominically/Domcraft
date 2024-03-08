@@ -32,7 +32,7 @@ pub struct Renderer {
   // imgui_platform: WinitPlatform,
 }
 
-struct RendererImgui {
+pub struct RendererImgui {
   ui: Context,
   renderer: imgui_wgpu::Renderer,
   platform: WinitPlatform,
@@ -77,11 +77,6 @@ impl Renderer {
 
     //Imgui setup from: https://github.com/Yatekii/imgui-wgpu-rs/blob/master/examples/hello-world.rs
     let imgui = RendererImgui::new(window, &device, &queue, &surface_cfg);
-    
-
-
-
-
 
 
     println!("Using {} for rendering.", adapter.get_info().name);
@@ -129,7 +124,7 @@ impl Renderer {
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
       bind_group_layouts: &[&camera_bind_group_layout],
-      label: Some("stinky pipeline layout"),
+      label: Some("pipeline layout"),
       push_constant_ranges: &[]
     }); //Not really necessary right now.
 
@@ -205,6 +200,10 @@ impl Renderer {
 
   pub fn bind_world(&mut self, world: ArcWorld) {
     self.world = Some(world);
+  }
+
+  pub fn imgui(&mut self) -> &mut RendererImgui {
+    &mut self.imgui
   }
 
   pub fn render(&mut self) -> Result<(), RenderError> {
@@ -292,7 +291,6 @@ impl Renderer {
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
     // let imgui_command_buffer = self.imgui.renderer.render(draw_data, queue, device, rpass);
-    
     out.present();
 
     Ok(())
@@ -334,12 +332,16 @@ impl RendererImgui {
     }]);
 
     let imgui_renderer = imgui_wgpu::Renderer::new(&mut imgui_ctx, &device, &queue, imgui_renderer_cfg);
-
+    
     RendererImgui {
       ui: imgui_ctx,
       platform: imgui_platform,
       renderer: imgui_renderer
     }
+  }
+
+  pub fn window_event<T>(&mut self, window: &Window, event: &winit::event::Event<'_, T>) {
+    self.platform.handle_event(self.ui.io_mut(), window, event);
   }
 
   fn render(&mut self, encoder: &mut CommandEncoder, device: &Device, queue: &Queue, view: &TextureView, depth_view: &TextureView) -> Result<(), RenderError> {

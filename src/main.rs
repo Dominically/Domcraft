@@ -1,7 +1,8 @@
-use std::{sync::{Mutex, Arc, mpsc::{channel, Receiver}}, thread, time::{Instant, Duration}};
+use std::{borrow::Borrow, sync::{mpsc::{channel, Receiver}, Arc, Mutex}, thread, time::{Duration, Instant}};
 
 use cgmath::Vector3;
-use winit::{window::{WindowBuilder}, event_loop::{EventLoop, ControlFlow}, event::{Event, WindowEvent, ElementState, VirtualKeyCode}, dpi::PhysicalPosition};
+use wgpu::Device;
+use winit::{dpi::PhysicalPosition, event::{DeviceEvent, ElementState, Event, VirtualKeyCode, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::WindowBuilder};
 use world::{chunk_worker_pool, chunk::Chunk};
 
 use crate::{renderer::Renderer, world::World};
@@ -75,17 +76,17 @@ async fn run() {
   window.set_cursor_visible(false);
 
   let mut is_focused = true;
+
   window.focus_window();
   event_loop.run(move |evt, _, ctrl| {
-
-    match evt {
-      Event::WindowEvent { window_id, event } if window.id() == window_id => {
+    match &evt {
+      Event::WindowEvent { window_id, event } if window.id() == *window_id => {
         match event {
           WindowEvent::CloseRequested => {
             *ctrl = ControlFlow::Exit;
           },
           WindowEvent::Resized(new_size) => {
-            renderer.resize(new_size);
+            renderer.resize(*new_size);
           },
           WindowEvent::KeyboardInput { device_id: _, input, is_synthetic: _ } => {
             match input.virtual_keycode {
@@ -99,28 +100,34 @@ async fn run() {
                   ElementState::Pressed => world.key_update(key, true),
                   ElementState::Released => world.key_update(key, false),
                 }
+
+                window.set_cursor_visible(world.is_mouse_unlocked());
               }
               _ => ()
             }
           },
           WindowEvent::Focused(f) => {
-            is_focused = f;
+            is_focused = *f;
           }
           _ => ()
         }
       }
-      Event::RedrawRequested( window_id ) if window.id() == window_id => {
+      Event::RedrawRequested( window_id ) if window.id() == *window_id => {
         renderer.render().unwrap();        
       },
       Event::DeviceEvent { device_id: _, event } if is_focused => { //Raw input from val?
         match event {
           winit::event::DeviceEvent::MouseMotion { delta } => {
             let mut world = world.lock().unwrap();
-            world.mouse_move(delta);
-            let _ = window.set_cursor_position(PhysicalPosition::new(
-              window.inner_size().width/2,
-              window.inner_size().height/2
-            ));
+            if !world.is_mouse_unlocked() {
+              world.mouse_move(*delta);
+              let _ = window.set_cursor_position(PhysicalPosition::new(
+                window.inner_size().width/2,
+                window.inner_size().height/2
+              ));
+            } else {
+              
+            }
           },
           _ => ()
         }
@@ -129,6 +136,25 @@ async fn run() {
         window.request_redraw()
       }
       _ => (),
+    };
+
+    let mut default_handle_evt = |bypass_check: bool| { //idk why this has to be mut
+      if bypass_check || world.lock().unwrap().is_mouse_unlocked() {
+        renderer.imgui().window_event(&window, &evt);
+      }
+    };
+
+    match &evt {
+      Event::DeviceEvent { device_id: _, event: device_event } => {
+        if let DeviceEvent::Key(key_event) = device_event {
+          default_handle_evt(key_event.state == ElementState::Released); //Bypass mouse check if key is released.
+        } else {
+          default_handle_evt(false);
+        }
+      }
+      _ => {
+        default_handle_evt(true);
+      }
     }
   });
 }
