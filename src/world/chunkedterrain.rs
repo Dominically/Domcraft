@@ -2,7 +2,7 @@ use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use cgmath::{num_traits::Signed, InnerSpace, Vector3};
 use fixed::traits::Fixed;
-use itertools::iproduct;
+use itertools::{iproduct, Itertools};
 use noise::{Perlin, NoiseFn, Seedable};
 use num_iter::{range_step_inclusive, RangeStepInclusive};
 
@@ -291,10 +291,9 @@ impl ChunkedTerrain {
         p + if is_positive_dir {hitbox.hi} else {hitbox.lo},
         // p + Vector3::from([0usize,1,2].map(|i| if is_positive_dir ^ (i==dir_dim) {hitbox.lo[i]} else {hitbox.hi[i]})) //Use coordinates of opposite corner except for the dimension of the side we are testing.
       ));
-
       
       //The orientation of these layers depends on the direction we are testing.
-
+      
       //Convert to f32 for ease of use.
       let rel_a_old = a_old - min.into();
       let rel_a_new = a_new - min.into();
@@ -304,13 +303,18 @@ impl ChunkedTerrain {
 
       let layers = get_layers_between(l_old, l_new, false);
       
-      
+      // if dir_dim == 1  && delta[dir_dim] < 0.0 {
+      //   let lc  = layers.clone().map(|l| l.map(|v| v + min[dir_dim]).collect_vec());
+      //   println!("min: {}, l_old: {}, l_new: {}, Test layers: {lc:?}", min[dir_dim],  l_old + Fixed64::from_num(min.y), l_new + Fixed64::from_num(min.y));
+      // }
+
       if let Some(iter) = layers{
         'layer_loop: for layer in iter {
           let layer_fixed64 = Fixed64::from_num(layer);
 
-          //TODO stop using t and min_t for colliding dimension.
-          let t = (layer_fixed64 - l_old)/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
+          //TODO stop using t and min_t for colliding dimension. (probably done).
+          //Add one to the layer because we are testing the block one less when the direction is negative.
+          let t = (layer_fixed64 - l_old )/(l_new - l_old); //This represents the fraction of the tick where the player passes through the layer.
           
           let rel_a_pos = {
             let mut pos = rel_a_old + (rel_a_new - rel_a_old) * t; //Get the position of the face at this point in time.
@@ -330,7 +334,12 @@ impl ChunkedTerrain {
           ).into();
 
           for (rel_x, rel_y, rel_z) in iproduct!(lx, ly, lz) {
-            let rel_usize = Vector3::from([rel_x as usize, rel_y as usize, rel_z as usize]);
+            let mut rel_usize = Vector3::from([rel_x as usize, rel_y as usize, rel_z as usize]);
+            
+            if !is_positive_dir { //bugfix
+              rel_usize[dir_dim] -= 1;
+            }
+
             let vis = vis_data.get_block_at(rel_usize);
             if vis.get_visible(block_side) {
               if t <= min_t {
@@ -370,7 +379,7 @@ impl ChunkedTerrain {
   }
 
   
-  ///Get visibility of blocks in a given area. This is used for hitbox testing.
+  ///Get visibility of blocks in a given area and store it into a (temporary) struct. This is used for hitbox testing.
   fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> BlockVisArea {
     //Input validation check (this should never panic ideally).
     min.zip(max, |mn, mx| if mn > mx {panic!("Invalid range passed to get_block_vis_area.")});
@@ -441,7 +450,7 @@ impl ChunkedTerrain {
         self.chunk_gc.send(chunk).unwrap();
       }
 
-      for ncy in new_start..green {  
+      for ncy in new_start..green {
         let new_chunk = make_new_chunk([ncx, ncy, ncz]);
         column.chunks.push(new_chunk)
       }
@@ -533,7 +542,7 @@ impl ChunkColumn {
 
 impl BlockVisArea {
   fn get_block_at(&self, pos: Vector3<usize>) -> BlockSideVisibility {
-    //Bounds check.
+    //Bounds check to prevent weird bugs.
     self.size.zip(pos, |s, p| if p >= s {
       panic!("Invalid block position. Pos: {0:?}. Size: {1:?}.", pos, self.size);
     });
@@ -554,8 +563,8 @@ enum ChunkRegenCoord {
 fn get_layers_between(a: Fixed64, b: Fixed64, inclusive: bool) -> Option<RangeStepInclusive<i32>> {
   let is_reversed = a>b;
   let (a_round, b_round) = if is_reversed ^ /* XOR */ inclusive {( //Is reversed. a is greater.
-    a.floor().to_num(),
-    b.ceil().to_num()
+    a.floor().to_num::<i32>(),
+    b.ceil().to_num::<i32>()
   )} else {( //Not reversed. b is greater.
     a.ceil().to_num(),
     b.floor().to_num()
@@ -566,5 +575,49 @@ fn get_layers_between(a: Fixed64, b: Fixed64, inclusive: bool) -> Option<RangeSt
     None
   } else {
     Some(range_step_inclusive(a_round, b_round, if is_reversed {-1} else {1})) //Cast to f32 for further calculation
+  }
+}
+
+
+//Tests to make sure get_layers_between(..) works properly.
+#[cfg(test)]
+mod tests {
+  use itertools::Itertools;
+
+use crate::util::Fixed64;
+
+  use super::get_layers_between;
+
+  fn test_range(a: f32, b: f32, incl: bool, expt: Option<Vec<i32>>) {
+    let lb = get_layers_between(Fixed64::from_num(a), Fixed64::from_num(b), incl);
+    assert_eq!(lb.is_some(), expt.is_some());
+
+    if expt.is_none() {
+      return;
+    }
+
+    let lb_vec = lb.unwrap().collect_vec();
+    let expt_vec = expt.unwrap();
+    assert_eq!(lb_vec, expt_vec);
+  }
+
+  #[test]
+  fn test_layers_pos() {
+    test_range(0.5, 2.5, false, Some(vec![1, 2]));
+  }
+
+  #[test]
+  fn test_layers_neg() {
+    test_range(2.5, 0.5, false, Some(vec![2, 1]));
+  }
+
+  #[test]
+  fn test_empty() {
+    test_range(0.1, 0.5, false, None);
+  }
+
+  #[test]
+  fn test_layers_val_neg() {
+    test_range(0.1, -1.5, false, Some(vec![0, -1]));
   }
 }

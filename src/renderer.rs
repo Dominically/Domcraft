@@ -120,6 +120,8 @@ impl Renderer {
         }],
     });
 
+    
+
     let depth_texture = Texture::create_depth_texture(&device, &surface_cfg, "Depth texture and stuff");
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -225,14 +227,12 @@ impl Renderer {
         world_lock.get_daylight_data()
       )
     };
-
     let camera_view = CameraUniform {
       view: view_mat.into(),
       player_position: player_pos.block_int.into(),
       padding_1: 0u32,
       sun_intensity: light_data.light_level,
       sun_normal: light_data.sun_direction.into(),
-      padding_3: [0u32; 4]
     };
     self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
 
@@ -390,7 +390,6 @@ pub struct CameraUniform {
   pub padding_1: u32,
   pub sun_normal: [f32; 3],
   pub sun_intensity: f32,
-  pub padding_3: [u32; 4]
 }
 
 impl Descriptable for ChunkVertex {

@@ -70,6 +70,10 @@ impl World {
     self.player.get_view_matrix(aspect_ratio, delta_t)
   }
 
+  pub fn get_look_direction(&self) -> [f32; 3] {
+    self.player.get_rotation_matrix().z.into() //i guessed this
+  }
+
   pub fn get_player_pos_c(&self) -> PlayerPosC {
     self.player.get_pos_c()
   }

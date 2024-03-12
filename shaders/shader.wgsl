@@ -20,6 +20,11 @@ struct CameraUniform {
     sun_intensity: f32,
 }
 
+// struct CameraFragmentUniform {
+//     sun_normal: vec3<f32>,
+//     sun_intensity: f32
+// }
+
 struct ChunkIDUniform {
     chunk_id: vec3<i32>,
 }
@@ -28,15 +33,19 @@ struct ChunkIDUniform {
 var<uniform> camera: CameraUniform;
 
 
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
-    let camera_position = vec3<f32>(in.abs_position - camera.player_position) + in.rel_position;
-    
+    let camera_relative = vec3<f32>(in.abs_position - camera.player_position) + in.rel_position;
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * vec4(camera_position, 1.0);
+    out.clip_position = camera.view_proj * vec4(camera_relative, 1.0);
     let dot_product = dot(in.normal, camera.sun_normal);
-    let light_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) * camera.sun_intensity;
-    let rgba = pow(in.colour.xyz * light_level, vec3<f32>(2.2, 2.2, 2.2));
+    let diffuse_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) * camera.sun_intensity;
+    //https://math.stackexchange.com/questions/13261/how-to-get-a-reflection-vector
+    let reflection = camera_relative - (2.0 * dot(camera_relative, in.normal) * in.normal);
+
+
+    let rgba = pow(in.colour.xyz * diffuse_level, vec3<f32>(2.2, 2.2, 2.2));
     out.colour = vec4(rgba, in.colour.w);
     return out;
 }

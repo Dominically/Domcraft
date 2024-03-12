@@ -20,7 +20,7 @@ pub const ADJACENT_OFFSETS: [[i32; 3]; 6] = [
   [0, 0, -1]
 ];
 
-const SUPERFLAT_MODE: bool = false;
+const DEBUG_MODE: bool = false;
 
 const CHUNK_RANGE_I32: Range<i32> = 0..CHUNK_SIZE_I32;
 
@@ -151,8 +151,9 @@ impl Chunk {
       ];
 
       let ypos = actual_pos[1];
-      if SUPERFLAT_MODE {
-        blocks.push(if actual_pos[1] > 0 {Block::Air} else {Block::Grass});
+      if DEBUG_MODE {
+        let floor = if ((x/4) + (z/4))%2==0 {0} else {1};
+        blocks.push(if actual_pos[1] >= floor {Block::Air} else {Block::Grass});
         continue;
       }
 

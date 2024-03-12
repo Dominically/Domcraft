@@ -14,6 +14,7 @@ mod util;
 pub type ArcWorld = Arc<Mutex<World>>;
 
 fn main() {
+  std::env::set_var("RUST_BACKTRACE", "1");
   println!("Starting Domcraft...");
   pollster::block_on(run());
   // do_thing();
