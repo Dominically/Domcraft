@@ -347,7 +347,8 @@ impl RendererImgui {
   fn render(&mut self, encoder: &mut CommandEncoder, device: &Device, queue: &Queue, view: &TextureView, depth_view: &TextureView) -> Result<(), RenderError> {
     let frame = self.ui.frame();
     let mut demo_open = true;
-    frame.show_demo_window(&mut demo_open); //testing demo window.
+    //TODO make debug menu
+    //frame.show_demo_window(&mut demo_open); //testing demo window.
     
     let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
         label: Some("Imgui render pass"),
