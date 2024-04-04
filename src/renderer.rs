@@ -1,35 +1,80 @@
 mod texture;
 pub mod buffer;
 
-use std::{fs::File, io::Read, borrow::Cow, sync::Arc, mem::size_of};
+use std::{borrow::Cow, sync::Arc, mem::size_of};
 
 use bytemuck_derive::{Pod, Zeroable};
 use imgui::{Context, FontSource};
 use itertools::Itertools;
 use wgpu::{
-  Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferBindingType, BufferDescriptor, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompareFunction, DepthBiasState, DepthStencilState, Device, DeviceDescriptor, Face, FragmentState, FrontFace, IndexFormat, Instance, InstanceDescriptor, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource, ShaderStages, StencilState, StoreOp, Surface, SurfaceConfiguration, TextureUsages, TextureView, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode
+  Backends,
+  BlendState,
+  Color,
+  ColorTargetState,
+  ColorWrites,
+  CommandEncoder,
+  CommandEncoderDescriptor,
+  CompareFunction,
+  DepthBiasState,
+  DepthStencilState,
+  Device,
+  DeviceDescriptor,
+  Face,
+  FragmentState,
+  FrontFace,
+  IndexFormat,
+  Instance,
+  InstanceDescriptor,
+  LoadOp,
+  MultisampleState,
+  Operations,
+  PipelineLayoutDescriptor,
+  PolygonMode,
+  PowerPreference,
+  PrimitiveState,
+  PrimitiveTopology,
+  Queue,
+  RenderPassColorAttachment,
+  RenderPassDepthStencilAttachment,
+  RenderPassDescriptor,
+  RenderPipeline,
+  RenderPipelineDescriptor,
+  RequestAdapterOptions, 
+  ShaderModuleDescriptor, 
+  ShaderSource, 
+  StencilState, 
+  StoreOp, 
+  Surface, 
+  SurfaceConfiguration, 
+  TextureUsages, 
+  TextureView, 
+  VertexAttribute, 
+  VertexBufferLayout,
+  VertexFormat,
+  VertexState,
+  VertexStepMode
 };
 
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{world::chunk::ChunkVertex, ArcWorld, renderer::texture::Texture};
+use crate::{renderer::{buffer::UniformBufferUsage, texture::Texture}, world::chunk::ChunkVertex, ArcWorld};
 
 use imgui_winit_support::{WinitPlatform, HiDpiMode};
+
+use self::buffer::UniformBuffer;
 
 pub struct Renderer {
   surface: Surface,
   surface_cfg: SurfaceConfiguration,
   device: Arc<Device>,
   queue: Arc<Queue>,
-  camera_buffer: Buffer,
-  camera_bind_group: BindGroup,
+  camera_buffer: UniformBuffer<CameraUniform>,
+  camera_fragment_buffer: UniformBuffer<CameraFragmentUniform>,
   depth_texture: Texture,
   pipeline: RenderPipeline,
   size: PhysicalSize<u32>,
   world: Option<ArcWorld>,
   imgui: RendererImgui,
-  // imgui_renderer: imgui_wgpu::Renderer,
-  // imgui_platform: WinitPlatform,
 }
 
 pub struct RendererImgui {
@@ -81,51 +126,20 @@ impl Renderer {
 
     println!("Using {} for rendering.", adapter.get_info().name);
 
-    let mut shader_file = File::open("./shaders/shader.wgsl").map_err(|_| RendererCreateError::ShaderLoadError)?;
-    let mut shader: String = String::new();
-    shader_file.read_to_string(&mut shader).map_err(|_| RendererCreateError::ShaderLoadError)?;
+    let shader = include_str!("../shaders/shader.wgsl");
 
     let shader_module = device.create_shader_module(ShaderModuleDescriptor { 
       label: Some("very cool shader module"), 
       source: ShaderSource::Wgsl(Cow::from(shader))
     });
 
-    let camera_buffer = device.create_buffer(&BufferDescriptor {
-        label: Some("camera buffer and stuff"),
-        size: std::mem::size_of::<CameraUniform>() as u64,
-        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let camera_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-      entries: &[BindGroupLayoutEntry {
-        binding: 0,
-        visibility: ShaderStages::VERTEX,
-        ty: BindingType::Buffer {
-            ty: BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    }],
-      label: Some("camera bind group layout"), 
-    });
-
-    let camera_bind_group = device.create_bind_group(&BindGroupDescriptor {
-        label: Some("camera bind group stuff"),
-        layout: &camera_bind_group_layout,
-        entries: &[BindGroupEntry {
-            binding: 0,
-            resource: camera_buffer.as_entire_binding(),
-        }],
-    });
-
+    let camera_buffer = UniformBuffer::<CameraUniform>::new(&device, UniformBufferUsage::Vertex, Some("Vertex camera buffer"));
+    let camera_fragment_buffer = UniformBuffer::<CameraFragmentUniform>::new(&device, UniformBufferUsage::Fragment, Some("Fragment camera buffer"));
     
-
     let depth_texture = Texture::create_depth_texture(&device, &surface_cfg, "Depth texture and stuff");
 
     let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-      bind_group_layouts: &[&camera_bind_group_layout],
+      bind_group_layouts: &[&camera_buffer.get_bind_group_layout(), &camera_fragment_buffer.get_bind_group_layout()],
       label: Some("pipeline layout"),
       push_constant_ranges: &[]
     }); //Not really necessary right now.
@@ -177,8 +191,9 @@ impl Renderer {
       device,
       queue,
       depth_texture,
-      camera_bind_group,
+      // camera_bind_group,
       camera_buffer,
+      camera_fragment_buffer,
       pipeline,
       size,
       world: None,
@@ -227,14 +242,24 @@ impl Renderer {
         world_lock.get_daylight_data()
       )
     };
+
     let camera_view = CameraUniform {
       view: view_mat.into(),
-      player_position: player_pos.block_int.into(),
+      position_abs: player_pos.block_int.into(),
+      position_rel: player_pos.block_dec.into(),
       padding_1: 0u32,
       sun_intensity: light_data.light_level,
+      padding_2: 0u32,
       sun_normal: light_data.sun_direction.into(),
     };
-    self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_view]));
+    self.camera_buffer.update(&self.queue, camera_view);
+
+    let camera_fragment_view = CameraFragmentUniform {
+      sun_intensity: light_data.light_level,
+      sun_normal: light_data.sun_direction.into()
+    };
+    self.camera_fragment_buffer.update(&self.queue, camera_fragment_view);
+
 
     let out = self.surface.get_current_texture().map_err(|_| RenderError::SurfaceError)?;
     let view = out.texture.create_view(&Default::default());
@@ -275,7 +300,9 @@ impl Renderer {
         occlusion_query_set: None,
         timestamp_writes: None
       });
-      render_pass.set_bind_group(0, &self.camera_bind_group, &[]); //Set player and camera uniform./Chunk uniform group
+      render_pass.set_bind_group(0, &self.camera_buffer.get_bind_group(), &[]); //Set player and camera uniform./Chunk uniform group
+      render_pass.set_bind_group(1, &self.camera_fragment_buffer.get_bind_group(), &[]); //Set camera data to fragment shader too.
+
       render_pass.set_pipeline(&self.pipeline);
 
       for data in chunk_datas.iter(){
@@ -311,10 +338,6 @@ impl RendererImgui {
         texture_format: surface_cfg.format,
         depth_format: Some(Texture::DEPTH_FORMAT),
         ..Default::default()
-        // sample_count: todo!(),
-        // shader: todo!(),
-        // vertex_shader_entry_point: todo!(),
-        // fragment_shader_entry_point: todo!(),
     };
 
     let hidpi_factor = window.scale_factor();
@@ -348,7 +371,9 @@ impl RendererImgui {
     let frame = self.ui.frame();
     let mut demo_open = true;
     //TODO make debug menu
-    //frame.show_demo_window(&mut demo_open); //testing demo window.
+    // if demo_open {
+    //   frame.show_demo_window(&mut demo_open); //testing demo window.
+    // }
     
     let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
         label: Some("Imgui render pass"),
@@ -387,10 +412,19 @@ trait Descriptable {
 #[repr(C)]
 pub struct CameraUniform {
   pub view: [[f32; 4]; 4],
-  pub player_position: [i32; 3], //The player position per block.
+  pub position_abs: [i32; 3], //The player position per block.
   pub padding_1: u32,
+  pub position_rel: [f32; 3], //Decimal part of player position. ALREADY ACCOUNTED FOR IN VIEW MATRIX.
+  pub padding_2: u32,
   pub sun_normal: [f32; 3],
   pub sun_intensity: f32,
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+pub struct CameraFragmentUniform {
+  pub sun_normal: [f32; 3],
+  pub sun_intensity: f32
 }
 
 impl Descriptable for ChunkVertex {

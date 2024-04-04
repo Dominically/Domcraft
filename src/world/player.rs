@@ -63,7 +63,7 @@ impl Player {
     let rotation = self.get_rotation_matrix();
     // let pos_offset = self.velocity * dt.as_secs_f32(); //To prevent stuttering and lagging on high Hz monitors.
     let pos_offset = Vector3::from([0.0; 3]); //TODO temp.
-    let view = Matrix4::look_to_lh(Point3::from_vec(self.position.get_dec() + pos_offset), rotation.z, rotation.y);
+    let view = Matrix4::look_to_lh(Point3::from_vec(/*self.position.get_dec() + */ pos_offset), rotation.z, rotation.y);
     let projection = projection(Deg(self.fov), aspect_ratio, 0.1, 400.0); //Very very far far plane.
 
     projection * view

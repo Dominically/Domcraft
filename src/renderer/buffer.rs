@@ -1,10 +1,12 @@
 use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
 use bytemuck::{Pod, cast_slice};
-use wgpu::{Buffer, Device, Queue, BufferDescriptor, BufferUsages};
+use wgpu::{BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages, Device, Label, Queue, ShaderStages};
+
+use super::Descriptable;
 
 //General buffer for either vertices or indices. (or anything else I happen to need it for).
-pub struct GenericBuffer<T: Pod> {
+pub struct ArrayBuffer<T: Pod> {
   buf: Arc<Buffer>,
   size: usize,
   length: usize,
@@ -17,10 +19,10 @@ pub struct GenericBuffer<T: Pod> {
 pub enum GenericBufferType {
   Vertex,
   Index,
-  Uniform
+  // Uniform
 }
 
-impl<T: Pod> GenericBuffer<T> {
+impl<T: Pod> ArrayBuffer<T> {
   ///Creates a new buffer.
   pub fn new(device: &Device, queue: &Queue, typ: GenericBufferType, contents: &[T], spare_reserve: usize) -> Self {
     let length = contents.len();
@@ -29,8 +31,7 @@ impl<T: Pod> GenericBuffer<T> {
     let usage = match typ {
         GenericBufferType::Vertex => BufferUsages::VERTEX,
         GenericBufferType::Index => BufferUsages::INDEX,
-        GenericBufferType::Uniform => BufferUsages::UNIFORM,
-        
+        // GenericBufferType::Uniform => BufferUsages::UNIFORM,
     };
 
     let buf = Arc::new(device.create_buffer(&BufferDescriptor {
@@ -71,8 +72,76 @@ impl<T: Pod> GenericBuffer<T> {
   }
 }
 
-// impl<T: Pod> Drop for GenericBuffer<T> {
-//     fn drop(&mut self) {
-//         self.buf.destroy();
-//     }
-// }
+pub struct UniformBuffer<T: Pod> {
+  buf: Buffer,
+  bind_group_layout: BindGroupLayout,
+  bind_group: BindGroup,
+  typ: PhantomData<T>
+}
+
+pub enum UniformBufferUsage {
+  Vertex,
+  Fragment
+}
+
+impl<T: Pod> UniformBuffer<T> {
+  pub fn new(device: &Device, typ: UniformBufferUsage, label: Option<&str>) -> Self{
+    let buf = device.create_buffer(&BufferDescriptor {
+        label: label.map(|s| format!("{s} buffer.")).as_deref(),
+        size: std::mem::size_of::<T>() as u64,
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    //TODO split buffers and bind groups apart.
+
+    let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        label: label.map(|s| format!("{s} bind group layout.")).as_deref(),
+        entries: &[BindGroupLayoutEntry {
+          binding: 0,//At the moment only one buffer per binding. I will increase it when I can be bothered.
+          visibility: match typ {
+            UniformBufferUsage::Vertex => ShaderStages::VERTEX,
+            UniformBufferUsage::Fragment => ShaderStages::FRAGMENT,
+          },
+          ty: BindingType::Buffer {
+            ty: BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None 
+          },
+          count: None, 
+        }],
+    });
+
+    let bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: label.map(|s| format!("{s} bind group.")).as_deref(),
+        layout: &bind_group_layout,
+        entries: &[BindGroupEntry {
+          binding: 0,
+          resource: buf.as_entire_binding()
+        }],
+    });
+
+    Self {
+      buf,
+      bind_group_layout,
+      bind_group,
+      typ: PhantomData
+    }
+  }
+
+  pub fn get_buffer(&self) -> &Buffer {
+    &self.buf
+  }
+
+  pub fn get_bind_group_layout(&self) -> &BindGroupLayout {
+    &self.bind_group_layout
+  }
+
+  pub fn get_bind_group(&self) -> &BindGroup {
+    &self.bind_group
+  }
+
+  pub fn update(&self, queue: &Queue, data: T) {
+    queue.write_buffer(&self.buf, 0, bytemuck::cast_slice(&[data]));
+  }
+}

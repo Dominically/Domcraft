@@ -7,7 +7,7 @@ use itertools::iproduct;
 use noise::{Perlin, NoiseFn};
 use wgpu::{Device, Queue};
 
-use crate::{renderer::buffer::{GenericBuffer, GenericBufferType}, world::chunkedterrain::CHUNK_SIZE_I32};
+use crate::{renderer::buffer::{ArrayBuffer, GenericBufferType}, world::chunkedterrain::CHUNK_SIZE_I32};
 
 use super::{block::{Block, BlockSideVisibility, BlockSide}, chunkedterrain::{SurfaceHeightmap, CHUNK_LENGTH, CHUNK_SIZE, CHUNK_RANGE}};
 
@@ -62,8 +62,8 @@ enum ChunkStateProgress {
 
 
 struct ChunkMesh {
-  vertex_buffer: GenericBuffer<ChunkVertex>,
-  index_buffer: GenericBuffer<u32>,
+  vertex_buffer: ArrayBuffer<ChunkVertex>,
+  index_buffer: ArrayBuffer<u32>,
 }
 
 pub struct ChunkMeshData {
@@ -378,8 +378,8 @@ impl Chunk {
       None => {
         *mesh_lock = Some(
           ChunkMesh {
-              vertex_buffer: GenericBuffer::new(device, queue, GenericBufferType::Vertex, &vertices, 400),
-              index_buffer: GenericBuffer::new(device, queue, GenericBufferType::Index, &indices, 600),
+              vertex_buffer: ArrayBuffer::new(device, queue, GenericBufferType::Vertex, &vertices, 400),
+              index_buffer: ArrayBuffer::new(device, queue, GenericBufferType::Index, &indices, 600),
           }
         );
       },

@@ -30,7 +30,7 @@ pub struct World {
 
 impl World {
   pub fn new(worker_pool_sender: Sender<ChunkTask>, chunk_gc: Sender<Arc<Chunk>>) -> Self {
-    let player_pos: FPVector = [1i32, 40, 1].into();
+    let player_pos: FPVector = [1i32, 50, 1].into();
     
     let player = Player::new(player_pos.into());
     
