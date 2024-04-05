@@ -121,12 +121,11 @@ impl World {
   }
 
   pub fn get_daylight_data(&self) -> WorldLightData {
-    const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds == 5 minutes
+    // const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds == 5 minutes
+    const DAY_CYCLE_TIME: f32 = 30.0; //30 seconds
     const TILT: Deg<f32> = Deg(40.0); //20 degree tilt from horizon
 
-    let cycle = 0f32; //TEMP
-
-    // let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
+    let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
     
     let rotation =  Matrix3::from_angle_z(TILT) * Matrix3::from_angle_y(Rad(2.0 * PI) * cycle);
 
@@ -134,7 +133,8 @@ impl World {
 
     let sun_angle = Rad(sun_direction.y.asin());
 
-    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.5, 1.0);
+    // let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.5, 1.0);
+    let light_level = 1.0; //TODO temp
 
     WorldLightData { sun_direction, light_level }
   }

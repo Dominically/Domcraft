@@ -14,8 +14,8 @@ const DEFAULT_HITBOX: HitBox = HitBox {
   // hi: [0.5, 0.5, 0.5].into()
 
   //WARNING: DO NOT USE RECURRING DECIMALS.
-  lo: FPVector { inner: Vector3 { x: Fixed64::lit("-0.5"), y: Fixed64::lit("-1.5"), z: Fixed64::lit("-0.5") } },
-  hi: FPVector { inner: Vector3 { x: Fixed64::lit("0.5"), y: Fixed64::lit("0.5"), z: Fixed64::lit("0.5") } },
+  lo: FPVector { inner: Vector3 { x: Fixed64::lit("-0.4"), y: Fixed64::lit("-1.4"), z: Fixed64::lit("-0.4") } },
+  hi: FPVector { inner: Vector3 { x: Fixed64::lit("0.4"), y: Fixed64::lit("0.4"), z: Fixed64::lit("0.4") } },
 };
 //TODO possibly split hitbox and position data into a separate entity data structure.
 
