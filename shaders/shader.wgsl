@@ -40,11 +40,14 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = camera.view_proj * vec4(camera_relative, 1.0);
     let dot_product = dot(in.normal, camera.sun_normal);
-    let diffuse_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) * camera.sun_intensity;
+    // let diffuse_level = clamp((dot_product+1.0)/2.0, 0.1, 1.0) * camera.sun_intensity;
+    let diffuse_level = clamp(clamp(dot_product/2.0 + 0.5, 0.0, 1.0) * camera.sun_intensity + 0.2, 0.0, 1.0);
+
     //https://math.stackexchange.com/questions/13261/how-to-get-a-reflection-vector
     let reflection = camera_relative - (2.0 * dot(camera_relative, in.normal) * in.normal);
 
-    let rgba = pow(in.colour.xyz * diffuse_level, vec3<f32>(2.2, 2.2, 2.2));
+    // let rgba = pow(in.colour.xyz * diffuse_level, vec3<f32>(2.2, 2.2, 2.2));
+    let rgba = in.colour.xyz * diffuse_level;
     out.colour = vec4(rgba, in.colour.w);
 
     // let colour_unclamped = vec4<f32>(reflection/128.0, 1.0);
@@ -71,10 +74,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // let sun_dir = vec3<f32>(0.5773502691896257, 0.5773502691896257, 0.5773502691896257);
     let reflect_norm = normalize(in.cam_reflect);
     let spec_intensity = dot(reflect_norm, camera_fragment.sun_normal);
-    let spec = pow(spec_intensity / 2.0 + 0.5, 32.0)/4.0;
+    let spec = pow(spec_intensity / 2.0 + 0.5, 8.0)/4.0 * camera_fragment.sun_intensity;
     let specular_add = vec4<f32>(spec, spec, spec, 0.0);
-
-    let colour = clamp(in.colour + spec, vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(1.0, 1.0, 1.0, 1.0));
+    
+    let pre_gamma_colour =  clamp(in.colour + specular_add, vec4<f32>(0.0, 0.0, 0.0, 0.0), vec4<f32>(1.0, 1.0, 1.0, 1.0));
+    let colour = pow(pre_gamma_colour, vec4<f32>(2.2, 2.2, 2.2, 1.0));
 
     return colour;
 }

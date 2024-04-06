@@ -4,6 +4,7 @@ pub mod buffer;
 use std::{borrow::Cow, sync::Arc, mem::size_of};
 
 use bytemuck_derive::{Pod, Zeroable};
+use cgmath::num_traits::Pow;
 use imgui::{Context, FontSource};
 use itertools::Itertools;
 use wgpu::{
@@ -273,7 +274,7 @@ impl Renderer {
       //Filter out empty chunks.
       let chunk_datas = chunk_list.into_iter().filter_map(|(_, data)| if data.index_buffer.1 > 0 {Some(data)} else {None}).collect_vec();
 
-      let ll = light_data.light_level as f64;
+      let ll = light_data.light_level.pow(2.2) as f64;
       let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
         color_attachments: &[Some(RenderPassColorAttachment {
           ops: Operations {
