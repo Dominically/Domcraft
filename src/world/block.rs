@@ -21,8 +21,8 @@ impl Block {
   ///Determines whether a player can pass through this block.
   pub fn is_solid(&self) -> bool {
     match self {
-      Block::Air | Block::Cloud => true,
-      _ => false
+      Block::Air | Block::Cloud => false,
+      _ => true
     }
   }
 

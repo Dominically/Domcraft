@@ -1,7 +1,7 @@
 mod texture;
 pub mod buffer;
 
-use std::{borrow::Cow, fmt::format, mem::size_of, sync::Arc, time::{Duration, Instant}};
+use std::{borrow::Cow, mem::size_of, sync::Arc, time::{Duration, Instant}};
 
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::num_traits::Pow;
@@ -520,7 +520,7 @@ impl Descriptable for ChunkVertex {
 pub enum RendererCreateError {
   NoDeviceFound,
   RequestDeviceError,
-  ShaderLoadError,
+  // ShaderLoadError,
 }
 
 #[derive(Debug)]
