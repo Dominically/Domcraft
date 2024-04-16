@@ -382,10 +382,6 @@ impl ChunkedTerrain {
       }
     });
 
-    if min_t < Fixed64::ONE { //TODO TEMP
-      print!("\nCollision Detected at t={:} on", min_t);
-    }
-
     let mut new_pos = *current_pos + velocity_fpv * (min_t * Fixed64::from_num(secs)); //NOTE: PLAYER POSITIONING NEEDS CORRECTION TO PREVENT GLITCHES.
 
     //Apply position correction and velocity update.
@@ -397,7 +393,6 @@ impl ChunkedTerrain {
 
         //Fixed-point values are safe to compare so I think I'm alright.
         if val.time == min_t {
-          print!(" {}={:.2}", ["X","Y","Z"][i_dim], val.pos);
           new_pos.inner[i_dim] = val.pos;
           velocity[i_dim] = 0.0; //Set velocity in that dimension to 0.
         }
