@@ -1,1 +1,5 @@
 Replace occurrences of [X; 3] with Vector3<X> including on GPU Repr(C) buffers because its easier and I can just cast them anyway.
+
+Add a moon cycle which is realistic and separate from the sun cycle.
+
+Add stars which have their own cycle.

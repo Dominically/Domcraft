@@ -1,11 +1,11 @@
-use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI, ops::Div};
+use std::{time::{Instant, Duration}, sync::{mpsc::Sender, Arc}, f32::consts::PI};
 
-use cgmath::{Matrix4, Rad, Vector3, Deg, Matrix3, Bounded, InnerSpace, num_traits::clamp, EuclideanSpace};
+use cgmath::{Deg, Matrix, Matrix3, Matrix4, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
 use crate::util::FPVector;
 
-use self::{player::{Player, PlayerPosC}, controls::{Controller, Control}, chunkedterrain::{ChunkedTerrain, CHUNK_SIZE}, chunk_worker_pool::ChunkTask, chunk::Chunk, block::Block};
+use self::{player::{Player, PlayerPosC}, controls::{Controller, Control}, chunkedterrain::ChunkedTerrain, chunk_worker_pool::ChunkTask, chunk::Chunk};
 
 mod block;
 mod player;
@@ -74,6 +74,10 @@ impl World {
     self.player.get_rotation_matrix().z.into() //i guessed this
   }
 
+  pub fn get_player_pos(&self) -> FPVector {
+    return self.player.get_position();
+  }
+
   pub fn get_player_pos_c(&self) -> PlayerPosC {
     self.player.get_pos_c()
   }
@@ -122,19 +126,16 @@ impl World {
 
   pub fn get_daylight_data(&self) -> WorldLightData {
     const DAY_CYCLE_TIME: f32 = 300.0; //300 seconds == 5 minutes
-    const TILT: Deg<f32> = Deg(40.0); //20 degree tilt from horizon
+    // const DAY_CYCLE_TIME: f32 = 30.0; //30 seconds
+    const TILT: Deg<f32> = Deg(45.0); //20 degree tilt from horizon
+    const POLAR: Deg<f32> = Deg(20.0); //Polar tilt.
 
-    let cycle = 0f32; //TEMP
-
-    // let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
+    let cycle = ((self.uptime + self.since_last_tick()).as_secs_f32() % DAY_CYCLE_TIME) / DAY_CYCLE_TIME;
     
-    let rotation =  Matrix3::from_angle_z(TILT) * Matrix3::from_angle_y(Rad(2.0 * PI) * cycle);
-
+    let rotation =  Matrix3::from_angle_x(TILT) * Matrix3::from_angle_y(Rad(-2.0 * PI) * -cycle) * Matrix3::from_angle_z(POLAR);
     let sun_direction = rotation * Vector3 {x: 1.0, y: 0.0, z: 0.0};
-
-    let sun_angle = Rad(sun_direction.y.asin());
-
-    let light_level = clamp((sun_angle / Rad::<f32>::from(TILT)) + 1.0, 0.5, 1.0);
+    //Calculate light level using my really cool formula.
+    let light_level = (sun_direction.y.clamp(0.0, 1.0) * 2.0).powf(2.0).clamp(0.0, 1.0);
 
     WorldLightData { sun_direction, light_level }
   }

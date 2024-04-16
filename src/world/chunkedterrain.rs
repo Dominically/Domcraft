@@ -2,7 +2,7 @@ use std::{ops::Range, sync::{Arc, mpsc::Sender}, mem, cmp::Ordering};
 
 use cgmath::{num_traits::Signed, InnerSpace, Vector3};
 use fixed::traits::Fixed;
-use itertools::{iproduct, Itertools};
+use itertools::iproduct;
 use noise::{Perlin, NoiseFn, Seedable};
 use num_iter::{range_step_inclusive, RangeStepInclusive};
 
@@ -28,8 +28,10 @@ pub struct ChunkedTerrain {
   chunk_gc: Sender<Arc<Chunk>>
 }
 
-struct BlockVisArea {
-  data: Vec<BlockSideVisibility>,
+
+///BlockArea contains information about where solid and passable blocks area.
+struct BlockArea {
+  data: Vec<bool>,
   size: Vector3<usize>
 }
 
@@ -276,10 +278,18 @@ impl ChunkedTerrain {
       max.zip(pos.get_int(), |p, q| p.max(q))
     ));
 
-    let vis_data = self.get_block_vis_area(min, max);
+    let solid_data = self.get_block_area(min, max);
 
-    let mut min_t = Fixed64::ONE; //Tick period at first collision.
-    let mut intersect_data: [Option<Fixed64>; 3] = [None; 3];
+    // let mut min_t = Fixed64::ONE; //Tick period at first collision.
+    #[derive(Clone, Copy)]
+    struct IntersectData { //Small struct for intersection info, mostly for readability.
+      pub time: Fixed64,
+      pub pos: Fixed64
+    }
+
+    let mut intersect_data: [Option<IntersectData>; 3] = [None; 3];
+
+    // let mut min_dim: Option<usize> = None;
 
     for dir_dim in 0..3 { //Now test sides for collision.
       if delta[dir_dim] == 0.0 {continue}; //Skip if the object is not moving in this direction.
@@ -340,15 +350,22 @@ impl ChunkedTerrain {
               rel_usize[dir_dim] -= 1;
             }
 
-            let vis = vis_data.get_block_at(rel_usize);
-            if vis.get_visible(block_side) {
-              if t <= min_t {
-                min_t = t;
-                let dim_pos = Fixed64::from_num(min[dir_dim]) + layer_fixed64 - if is_positive_dir {hitbox.hi.inner[dir_dim]} else {hitbox.lo.inner[dir_dim]};
+            let solid = solid_data.get_block_at(rel_usize);
+            if solid {
+              // if t <= min_t {
+              //   min_t = t;
+
+              //   let dim_pos = Fixed64::from_num(min[dir_dim]) + layer_fixed64 - if is_positive_dir {hitbox.hi.inner[dir_dim]} else {hitbox.lo.inner[dir_dim]};
                 
-                intersect_data[dir_dim] = Some(dim_pos);
-              }
-              break 'layer_loop;
+              //   intersect_data[dir_dim] = Some(dim_pos);
+              // }
+              let resolved_pos = Fixed64::from_num(min[dir_dim]) + layer_fixed64 - if is_positive_dir {hitbox.hi.inner[dir_dim] + Fixed64::DELTA /* bugfix */} else {hitbox.lo.inner[dir_dim]}; //i can't quite remember what this does, but i think it's the resolved player position
+              
+              intersect_data[dir_dim] = Some(IntersectData {
+                time: t,
+                pos: resolved_pos
+              });
+              break 'layer_loop; //Skip to next dimension
             }
           }
         }
@@ -357,30 +374,43 @@ impl ChunkedTerrain {
     
     let velocity_fpv: FPVector = (*velocity).into();
 
-    let mut new_pos = *current_pos + velocity_fpv * (min_t * Fixed64::from_num(secs)); //TODO temp for now.
+    let min_t = intersect_data.iter().fold(Fixed64::ONE, |acc, val| {
+      if let Some(isect_data) = val {
+        acc.min(isect_data.time)
+      } else {
+        acc
+      }
+    });
 
-    // if current_pos.inner.y >= 1.5 && new_pos.inner.y < 1.5 {
-    //   println!("Passing through floor.");
-    // }
+    let mut new_pos = *current_pos + velocity_fpv * (min_t * Fixed64::from_num(secs)); //NOTE: PLAYER POSITIONING NEEDS CORRECTION TO PREVENT GLITCHES.
 
+    //Apply position correction and velocity update.
     for (i_dim, i_val) in intersect_data.iter().enumerate() {
       if let Some(val) = *i_val {
-        //TODO collision resolution here.
-        new_pos.inner[i_dim] = val;
-        velocity[i_dim] = 0.0;
+        // //TODO collision resolution here.
+        // new_pos.inner[i_dim] = val;
+        // velocity[i_dim] = 0.0;
+
+        //Fixed-point values are safe to compare so I think I'm alright.
+        if val.time == min_t {
+          new_pos.inner[i_dim] = val.pos;
+          velocity[i_dim] = 0.0; //Set velocity in that dimension to 0.
+        }
       }
     }
 
     if min_t < Fixed64::ONE && velocity.magnitude() > 0.0{ //If tick has not been fully processed and player is still moving.
-      self.update_collision_info(&mut new_pos, velocity, secs * (1.0f32 - min_t.to_num::<f32>()), hitbox);
+      self.update_collision_info(&mut new_pos, velocity, secs * (1.0f32 - min_t.to_num::<f32>()), hitbox); //NOTE this is recusrive
     }
 
     *current_pos = new_pos;
   }
 
   
-  ///Get visibility of blocks in a given area and store it into a (temporary) struct. This is used for hitbox testing.
-  fn get_block_vis_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> BlockVisArea {
+  ///Get visibility of blocks in a given area and store it into a (temporary) struct, mainly used for hitbox testing.
+  /// 
+  /// This function copies the data instead of referencing/viewing it, meaning that changes in the terrain will not be reflected during the lifetime of BlockVisArea.
+  fn get_block_area(&self, min: Vector3<i32>, max: Vector3<i32>) -> BlockArea {
     //Input validation check (this should never panic ideally).
     min.zip(max, |mn, mx| if mn > mx {panic!("Invalid range passed to get_block_vis_area.")});
 
@@ -391,14 +421,14 @@ impl ChunkedTerrain {
     //Create a range from positions.
     let cid_len = cid_min.zip(cid_max, |mn, mx| mx - mn) + Vector3::from([1i32; 3]); //Add one to length because range is inclusive.
 
-    let mut vis_data = Vec::<BlockSideVisibility>::with_capacity(((max.x-min.x)*(max.y-min.y)*(max.z-min.z)) as usize); 
+    let mut block_area = Vec::<bool>::with_capacity(((max.x-min.x)*(max.y-min.y)*(max.z-min.z)) as usize); 
     
-    let mut chunk_vis = Vec::new(); //probably not needed to use with_capacity as it won't usually be that many chunks
+    let mut chunks = Vec::new(); //probably not needed to use with_capacity as it won't usually be that many chunks
 
     for (cx, cy, cz) in iproduct!(cid_min.x..=cid_max.x, cid_min.y..=cid_max.y, cid_min.z..=cid_max.z) {
       let data = self.get_chunk_at(&[cx, cy, cz]).map_or_else(|| ChunkDataView::new_blank(), |c| c.get_data_view());
       // let data = ChunkDataView::new_blank();
-      chunk_vis.push(data);
+      chunks.push(data);
     }
     for (x, y, z) in iproduct!(min.x..=max.x, min.y..=max.y, min.z..=max.z) {
       let pos = Vector3::from([x, y, z]);
@@ -409,23 +439,24 @@ impl ChunkedTerrain {
         panic!("Bad position: {pos:?}, cid_min: {cid_min:?}, rel_chunk: {rel_chunk:?}, chunk_offset: {chunk_offset:?}");
       }
       //Get the chunk vis data from the `chunk_vis` vec.
-      let chunk_data = chunk_vis.get(
+      let chunk_data = chunks.get(
         (rel_chunk.z + //i made my variable names too long help
         rel_chunk.y * cid_len.z +
         rel_chunk.x * (cid_len.y * cid_len.z)) as usize
       ).unwrap();
 
       //Get visibility data.
-      let vis = chunk_data.get_block_at(chunk_offset);
+      let vis = chunk_data.is_solid_at(chunk_offset);
 
-      vis_data.push(vis);
+      block_area.push(vis);
     }
     
-    BlockVisArea {
-      data: vis_data,
+    BlockArea {
+      data: block_area,
       size: (max - min).map(|int| int as usize + 1) //Add 1 because it is inclusive.
     }
   }
+
 
   fn reuse_column(&self, column: &mut ChunkColumn, new_bounds: [[i32; 3]; 2], column_pos: [i32; 2], regen: [ChunkRegenCoord; 3]) {
     let [ncx, ncz] = column_pos;
@@ -472,7 +503,7 @@ impl ChunkedTerrain {
             column.chunks.push(reused_chunk);
           },
           None => {
-            panic!("Reused chunk was none.")
+            panic!("Reused chunk did not exist.")
           },
         }
       }
@@ -540,8 +571,8 @@ impl ChunkColumn {
   }
 }
 
-impl BlockVisArea {
-  fn get_block_at(&self, pos: Vector3<usize>) -> BlockSideVisibility {
+impl BlockArea {
+  fn get_block_at(&self, pos: Vector3<usize>) -> bool {
     //Bounds check to prevent weird bugs.
     self.size.zip(pos, |s, p| if p >= s {
       panic!("Invalid block position. Pos: {0:?}. Size: {1:?}.", pos, self.size);

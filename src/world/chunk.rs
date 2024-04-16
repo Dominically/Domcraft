@@ -41,7 +41,7 @@ struct ChunkState {
 ///This is a temporary struct that keeps the RwLock for the chunk vis data unlocked for the lifetime of this struct.
 pub(crate) struct ChunkDataView<'a> {
   //Make sure that data lives as long as the struct
-  data: Option<RwLockReadGuard<'a, Option<Vec<BlockSideVisibility>>>>
+  data: Option<RwLockReadGuard<'a, Option<Vec<Block>>>>
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
@@ -432,7 +432,7 @@ impl Chunk {
   pub(super) fn get_data_view(&self) -> ChunkDataView {
     if self.block_vis.read().unwrap().is_some() {
       ChunkDataView {
-          data: Some(self.block_vis.read().unwrap()),
+          data: Some(self.blocks.read().unwrap()),
       }
     } else {
       ChunkDataView::new_blank()
@@ -465,31 +465,20 @@ impl Chunk {
 }
 
 impl ChunkDataView<'_> {
-  pub fn get_block_at(&self, pos: Vector3<i32>) -> BlockSideVisibility {
+  pub fn is_solid_at(&self, pos: Vector3<i32>) -> bool {
     let index = Chunk::rel_pos_to_index(pos.x, pos.y, pos.z).expect("Coordinate outside of local chunk range!");
 
     match &self.data {
         Some(data) => {
           match data.deref() {
             Some(d) => {
-              *d.get(index).unwrap()
+              d.get(index).unwrap().is_solid()
             },
             None => panic!("Chunk data is null!"),
-        }
+          }
         },
         None => { //Chunk vis data does not yet exist, so make the edges of the chunk solid.
-          let mut vis = BlockSideVisibility::new(false);
-          //TODO make less repetitive if possible.
-          vis.set_visible(BlockSide::Right, pos.x==CHUNK_SIZE_I32);
-          vis.set_visible(BlockSide::Left, pos.x==0);
-
-          vis.set_visible(BlockSide::Above, pos.y==CHUNK_SIZE_I32);
-          vis.set_visible(BlockSide::Below, pos.y==0);
-
-          vis.set_visible(BlockSide::Back, pos.z==CHUNK_SIZE_I32);
-          vis.set_visible(BlockSide::Front, pos.z==0);
-
-          vis
+          true
         },
     }
   }

@@ -1,7 +1,5 @@
-use std::{borrow::Borrow, sync::{mpsc::{channel, Receiver}, Arc, Mutex}, thread, time::{Duration, Instant}};
+use std::{sync::{mpsc::{channel, Receiver}, Arc, Mutex}, thread, time::{Duration, Instant}};
 
-use cgmath::Vector3;
-use wgpu::Device;
 use winit::{dpi::PhysicalPosition, event::{DeviceEvent, ElementState, Event, VirtualKeyCode, WindowEvent}, event_loop::{ControlFlow, EventLoop}, window::WindowBuilder};
 use world::{chunk_worker_pool, chunk::Chunk};
 
@@ -18,19 +16,6 @@ fn main() {
   println!("Starting Domcraft...");
   pollster::block_on(run());
   // do_thing();
-}
-
-type FixedPoint = fixed::FixedI64::<fixed::types::extra::U32>;
-fn fixed(val: f32) -> FixedPoint{
-  FixedPoint::from_num(val)
-}
-
-fn do_thing() {
-  let a = Vector3::from([12.5, 0.0, -5.2].map(fixed));
-  let b = Vector3::from([1.2, 2.3, 3.4].map(fixed));
-  let floored: Vector3<i32> = a.map(|v| v.to_num());
-  println!("Test: {:?}", a);
-  println!("Floored: {:?}", floored);
 }
 
 async fn run() {
