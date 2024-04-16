@@ -69,6 +69,8 @@ impl Player {
     projection * view
   }
 
+  
+
   pub fn rotate_camera(&mut self, dx: impl Into<Rad<f32>>, dy: impl Into<Rad<f32>>) {
     let dxr = dx.into();
     let dyr = dy.into();
