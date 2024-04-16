@@ -1,10 +1,11 @@
 mod texture;
 pub mod buffer;
 
-use std::{borrow::Cow, sync::Arc, mem::size_of};
+use std::{borrow::Cow, fmt::format, mem::size_of, sync::Arc, time::{Duration, Instant}};
 
 use bytemuck_derive::{Pod, Zeroable};
 use cgmath::num_traits::Pow;
+use circular_buffer::CircularBuffer;
 use imgui::{Context, FontSource};
 use itertools::Itertools;
 use wgpu::{
@@ -58,11 +59,14 @@ use wgpu::{
 
 use winit::{window::Window, dpi::PhysicalSize};
 
-use crate::{renderer::{buffer::UniformBufferUsage, texture::Texture}, world::chunk::ChunkVertex, ArcWorld};
+use crate::{renderer::{buffer::UniformBufferUsage, texture::Texture}, util::FPVector, world::chunk::ChunkVertex, ArcWorld};
 
 use imgui_winit_support::{WinitPlatform, HiDpiMode};
 
 use self::buffer::UniformBuffer;
+
+const FPS_ROLLING_AVG: usize = 8; //remember to change both at the same time
+const FPS_ROLLING_AVG_F32: f32 = 8.0;
 
 pub struct Renderer {
   surface: Surface,
@@ -76,12 +80,19 @@ pub struct Renderer {
   size: PhysicalSize<u32>,
   world: Option<ArcWorld>,
   imgui: RendererImgui,
+  last_frame: Option<Instant>,
+  frame_times: CircularBuffer<FPS_ROLLING_AVG, Duration>,
 }
 
 pub struct RendererImgui {
   ui: Context,
   renderer: imgui_wgpu::Renderer,
   platform: WinitPlatform,
+}
+
+struct ImguiData {
+  pub fps: Option<f32>,
+  pub player_pos: FPVector,
 }
 
 //Modified from https://sotrh.github.io/learn-wgpu/
@@ -111,6 +122,8 @@ impl Renderer {
 
     let size = window.inner_size();
     let surface_caps = surface.get_capabilities(&adapter);
+    
+
     let surface_cfg = SurfaceConfiguration {
       format: surface_caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap(),
       height: size.height,
@@ -199,6 +212,8 @@ impl Renderer {
       size,
       world: None,
       imgui,
+      last_frame: None,
+      frame_times: CircularBuffer::new()
     })
   }
 
@@ -234,13 +249,14 @@ impl Renderer {
         },
     };
 
-    let (view_mat, player_pos, chunk_list, light_data) = {
+    let (view_mat, player_pos, chunk_list, light_data, pos_fpv) = {
       let world_lock = world.lock().unwrap();
       (
         world_lock.get_player_view(self.size.width as f32/self.size.height as f32), 
         world_lock.get_player_pos_c(),
         world_lock.get_terrain().get_meshes(),
-        world_lock.get_daylight_data()
+        world_lock.get_daylight_data(),
+        world_lock.get_player_pos(),
       )
     };
 
@@ -314,13 +330,37 @@ impl Renderer {
       
     }
 
-    self.imgui.render(&mut encoder, &self.device, &self.queue, &view, &depth_view)?;
+    //Calculate fps
+    let fps_avg = if self.frame_times.is_full() {
+      //Calculate mean only if the fps buffer is full.
+
+      self.frame_times.iter().map(|dur| *dur).reduce(|dur, acc| {
+        dur+acc
+      }).map(|total_dur| FPS_ROLLING_AVG_F32/total_dur.as_secs_f32())
+    } else {None};
+
+    //Process imgui data.
+    let data = ImguiData {
+        fps: fps_avg,
+        player_pos: pos_fpv
+    };
+
+    self.imgui.render(&data, &mut encoder, &self.device, &self.queue, &view, &depth_view)?;
 
     let command_buffers = std::iter::once(encoder.finish());
     self.queue.submit(command_buffers);
     // let imgui_command_buffer = self.imgui.renderer.render(draw_data, queue, device, rpass);
     out.present();
 
+    //FPS tracking.
+    if let Some(last_frame_inst) = self.last_frame {
+      //Calculate frame time.
+      let frame_duration = Instant::now().duration_since(last_frame_inst);
+      self.frame_times.push_front(frame_duration);
+    }
+    self.last_frame = Some(Instant::now());
+
+    //Rendering complete.
     Ok(())
   }
 }
@@ -368,9 +408,26 @@ impl RendererImgui {
     self.platform.handle_event(self.ui.io_mut(), window, event);
   }
 
-  fn render(&mut self, encoder: &mut CommandEncoder, device: &Device, queue: &Queue, view: &TextureView, depth_view: &TextureView) -> Result<(), RenderError> {
+  fn prep_window(frame: &mut imgui::Ui, data: &ImguiData) {
+    let fps_string = data.fps.map_or(String::from("???"), |fps| format!("{:.1}", fps));
+
+    frame.window("Debug Menu")
+      .size([300.0, 100.0], imgui::Condition::FirstUseEver)
+      .build(|| {
+        frame.text_colored([1.0, 1.0, 0.7, 1.0], "Hold ALT to access cursor...");
+        frame.text_wrapped(format!("FPS: {}", fps_string));
+        frame.text_wrapped(format!("X: {:.4}", {data.player_pos.inner.x}));
+        frame.text_wrapped(format!("Y: {:.4}", {data.player_pos.inner.y}));
+        frame.text_wrapped(format!("Z: {:.4}", {data.player_pos.inner.z}));
+      });
+  }
+
+
+  fn render(&mut self, data: &ImguiData, encoder: &mut CommandEncoder, device: &Device, queue: &Queue, view: &TextureView, depth_view: &TextureView) -> Result<(), RenderError> {
     let frame = self.ui.frame();
-    let mut demo_open = true;
+    
+    Self::prep_window(frame, data);
+    // let mut demo_open = true;
     //TODO make debug menu
     // if demo_open {
     //   frame.show_demo_window(&mut demo_open); //testing demo window.
